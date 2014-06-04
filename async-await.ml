@@ -13,9 +13,9 @@ struct
   | NoStatement
   | Expression of expression * statement
   | Return of expression * statement
+  | If of expression * statement * statement * statement
   | Label of string * statement * statement
   | Break of string * statement
-  | If of expression * statement * statement * statement
   | While of string * expression * statement * statement
   | Continue of string * statement
   | TryCatch of statement * string * statement * statement
@@ -26,15 +26,15 @@ struct
   (* | Case of string * int * statement * cases *)
 
   type function_declaration =
-    | Sync of string * string list * statement
-    | Async of string * string list * statement
+    | Sync of string * string list * string list * statement
+    | Async of string * string list * string list * statement
 end
 
 let expression_stmt expr rest = AST.Expression (expr, rest)
 let return_stmt expr rest = AST.Return (expr, rest)
+let if_stmt expr thn els rest = AST.If (expr, thn, els, rest)
 let label_stmt label stmt rest = AST.Label (label, stmt, rest)
 let break_stmt label rest = AST.Break (label, rest)
-let if_stmt expr thn els rest = AST.If (expr, thn, els, rest)
 let while_stmt label expr body rest = AST.While (label, expr, body, rest)
 let continue_stmt label rest = AST.Continue (label, rest)
 let try_catch_stmt stmt id catch_stmt rest = AST.TryCatch (stmt, id, catch_stmt, rest)
@@ -47,8 +47,6 @@ module IR =
 struct
   type value =
   | Constant of int
-  (* TODO(kmillikin): Assignments do not work in the presence of control flow. *)
-  | Variable of string
 
   and expression =
   | LetVal of string * value * expression
@@ -70,155 +68,213 @@ let gensym base_name =
   let id = base_name ^ string_of_int (!gensym_counter) in
   (gensym_counter := !gensym_counter + 1; id)
 
-let rec translate_e expr k ek =
+let initial_env parameters locals =
+  List.map (fun x -> (x, x)) (parameters @ locals)
+
+let update_env x v env =
+  List.map (fun (x', v') -> if x' = x then (x, v) else (x', v')) env
+
+let rec translate_e expr env k ek =
   match expr with
   | AST.Constant n ->
     let v = gensym "v" in
-    IR.LetVal (v, IR.Constant n, k v)
+    IR.LetVal (v, IR.Constant n, k v env)
   | AST.Variable id ->
-    k id
+    k (List.assoc id env) env
   | AST.Assignment (id, expr) ->
-    translate_e expr
-      (fun v -> IR.LetVal (id, IR.Variable v, k v))
-      ek
+    translate_e expr env (fun v env -> k v (update_env id v env)) ek
   | AST.Call (name, args) ->
     let c = gensym "cont" in
     let v = gensym "v" in
-    translate_args args
-      (fun vs ->
-        IR.LetCont (c, [v], k v, IR.CallFun (name, vs, c)))
+    translate_args args env
+      (fun vs env ->
+        IR.LetCont (c, [v], k v env, IR.CallFun (name, vs, c)))
       ek
   | AST.Throw expr ->
-    translate_e expr ek ek
+    translate_e expr env ek ek
   | AST.Await expr ->
     let c = gensym "cont" in
     let x = gensym "v" in
     let throw = gensym "throw" in
     let e = gensym "e" in
-    translate_e expr
-      (fun v ->
-        IR.LetCont (c, [x], k x,
-          IR.LetCont (throw, [e], ek e,
+    translate_e expr env
+      (fun v env ->
+        IR.LetCont (c, [x], k x env,
+          IR.LetCont (throw, [e], ek e env,
             IR.Await (v, c, throw))))
       ek
-and translate_args args k ek =
+and translate_args args env k ek =
   match args with
-    | [] -> k []
+    | [] -> k [] env
     | arg :: args ->
-      translate_e arg
-        (fun v -> translate_args args (fun vs -> k (v :: vs)) ek)
+      translate_e arg env
+        (fun v env -> translate_args args env (fun vs env -> k (v :: vs) env) ek)
         ek
 
-let mkcont name = fun () -> IR.CallCont (name, [])
+let mkcont name =
+  fun env ->
+    let args = List.map (fun (_, v) -> v) env in
+    IR.CallCont (name, args)
 
-let rec translate_s stmt k ek bks cks rk =
+let mkcont1 name =
+  fun v env ->
+    let extra_args = List.map (fun (_, v) -> v) env in
+    IR.CallCont (name, v :: extra_args)
+
+let mkcont2 name =
+  fun v0 v1 env ->
+    let extra_args = List.map (fun (_, v) -> v) env in
+    IR.CallCont (name, v0 :: v1 :: extra_args)
+
+let fresh_env env =
+  List.fold_right
+    (fun (x, v) (env, parameters) ->
+      let fresh = gensym x in
+      ((x, fresh) :: env, fresh :: parameters))
+    env
+    ([], [])
+
+let rec translate_s stmt env k ek bks cks rk =
   match stmt with
   | AST.NoStatement ->
-    k ()
+    k env
   | AST.Expression (expr, next) ->
-    translate_e expr
-      (fun v -> translate_s next k ek bks cks rk) ek
+    translate_e expr env
+      (fun v env -> translate_s next env k ek bks cks rk) ek
   | AST.Return (expr, next) ->
-    translate_e expr rk ek
-  | AST.Label (label, stmt, next) ->
-    let break = gensym "break" in
-    IR.LetCont (break, [], translate_s next k ek bks cks rk,
-      translate_s stmt (mkcont break) ek ((label, mkcont break) :: bks) cks rk)
-  | AST.Break (label, next) ->
-    List.assoc label bks ()
+    translate_e expr env rk ek
   | AST.If (expr, thn, els, next) ->
     let join = gensym "join" in
+    let (join_env, join_parameters) = fresh_env env in
     let if_true = gensym "then" in
     let if_false = gensym "else" in
-    translate_e expr
-      (fun v ->
-	IR.LetCont (join, [], translate_s next k ek bks cks rk,
-          IR.LetCont (if_true, [], translate_s thn (mkcont join) ek bks cks rk,
-            IR.LetCont (if_false, [], translate_s els (mkcont join) ek bks cks rk,
+    translate_e expr env
+      (fun v env ->
+	IR.LetCont (join, join_parameters, translate_s next join_env k ek bks cks rk,
+          IR.LetCont (if_true, [], translate_s thn env (mkcont join) ek bks cks rk,
+            IR.LetCont (if_false, [], translate_s els env (mkcont join) ek bks cks rk,
               IR.If (v, if_true, if_false)))))
       ek
+  | AST.Label (label, stmt, next) ->
+    let break = gensym "break" in
+    let (break_env, break_parameters) = fresh_env env in
+    IR.LetCont (break, "_" :: break_parameters, translate_s next break_env k ek bks cks rk,
+      translate_s stmt env (mkcont1 break "_") ek ((label, mkcont1 break) :: bks) cks rk)
+  | AST.Break (label, next) ->
+    List.assoc label bks "_" env
   | AST.While (label, expr, stmt, next) ->
     let loop = gensym "continue" in
+    let (loop_env, loop_parameters) = fresh_env env in
     let break = gensym "break" in
+    let (break_env, break_parameters) = fresh_env env in
+    let not_taken = gensym "not_taken" in
     let body = gensym "body" in
-    translate_e expr
-      (fun v ->
-	IR.LetCont (loop, [],
-		    IR.LetCont (break, [], translate_s next k ek bks cks rk,
-		      IR.LetCont (body, [], translate_s stmt (mkcont loop) ek
-			                      ((label, mkcont break) :: bks)
-					      ((label, mkcont loop) :: cks)
-				              rk,
-		        IR.If (v, body, break))),
-	  IR.CallCont (loop, [])))
-      ek
+    IR.LetCont (loop, loop_parameters,
+                translate_e expr loop_env
+                  (fun v body_env ->
+                    IR.LetCont (break, break_parameters,
+                                translate_s next break_env k ek bks cks rk,
+                      IR.LetCont (not_taken, [], (mkcont break) body_env,
+                        IR.LetCont (body, [], translate_s stmt body_env
+                                                (mkcont1 loop "_") ek
+                                                ((label, mkcont1 break) :: bks)
+                                                ((label, mkcont1 loop) :: cks)
+                                                rk,
+                          IR.If (v, body, not_taken))))) ek,
+      (mkcont loop) env)
   | AST.Continue (label, next) ->
-    List.assoc label bks ()
+    List.assoc label cks "_" env
   | AST.TryCatch (body, id, catch_stmt, next) ->
     let rest = gensym "rest" in
+    let (rest_env, rest_parameters) = fresh_env env in
     let throw = gensym "throw" in
     let e = gensym "e" in
-    IR.LetCont (rest, [], translate_s next k ek bks cks rk,
-      IR.LetCont (throw, [e], translate_s catch_stmt (mkcont rest) ek bks cks rk,
-        translate_s body (mkcont rest) (fun e -> IR.CallCont (throw, [e])) bks cks rk))
+    let (throw_env, throw_parameters) = fresh_env env in
+    IR.LetCont (rest, rest_parameters, translate_s next rest_env k ek bks cks rk,
+      IR.LetCont (throw, e :: throw_parameters,
+                  translate_s catch_stmt throw_env (mkcont rest) ek bks cks rk,
+        translate_s body env (mkcont rest) (mkcont1 throw) bks cks rk))
   | AST.TryFinally (body, finally_stmt, next) ->
+    (* Names for all the introduced continuations and parameters. *)
     let rest = gensym "rest" in
-    let rethrow = gensym "throw" in let e = gensym "e" in
-    let return = gensym "return" in let v = gensym "v" in
-    let b_names = List.map (fun _ -> gensym "break") bks in
-    let c_names = List.map (fun _ -> gensym "continue") cks in
-    let finally = gensym "finally" in let c = gensym "where" in let x = gensym "what" in
-    let ek' = fun e -> IR.CallCont (finally, [rethrow; e]) in
-    let new_cont = fun k -> fun () -> IR.CallCont (finally, [k; "_"]) in
-    let new_break_conts = List.map new_cont b_names in
-    let new_continue_conts = List.map new_cont c_names in
-    let bks' = List.map2 (fun (label, _) bk -> (label, bk)) bks new_break_conts in
-    let cks' = List.map2 (fun (label, _) ck -> (label, ck)) cks new_continue_conts in
-    let rk' = fun v -> IR.CallCont (finally, [return; v]) in
+    let (rest_env, rest_parameters) = fresh_env env in
+    let rethrow = gensym "throw" in
+    let e = gensym "e" in
+    let (rethrow_env, rethrow_parameters) = fresh_env env in
+    let return = gensym "return" in
+    let v = gensym "v" in
+    let (return_env, return_parameters) = fresh_env env in
+    let break_names = List.map (fun _ -> gensym "break") bks in
+    let continue_names = List.map (fun _ -> gensym "continue") cks in
+    let finally = gensym "finally" in
+    let c = gensym "where" in
+    let x = gensym "what" in
+    let (finally_env, finally_parameters) = fresh_env env in
+    (* Wrap the existing continuations to go through finally. *)
+    let ek' = mkcont2 finally rethrow in
+    let bks' =
+      List.map2 (fun (label, _) name -> (label, mkcont2 finally name)) 
+        bks break_names in
+    let cks' =
+      List.map2 (fun (label, _) name -> (label, mkcont2 finally name))
+        cks continue_names in
+    let rk' = mkcont2 finally return in
+    (* Translate the body and wrap layers and layers of continuation bindings *)
+    let translated_body = translate_s body env (mkcont rest) ek' bks' cks' rk' in
     let inner =
-      IR.LetCont (rethrow, [e], ek e,
-        IR.LetCont (return, [v], rk v,
-          IR.LetCont (finally, [c; x], translate_s finally_stmt
-                                       (fun () -> IR.CallCont (c, [x]))
-                                       ek bks cks rk,
-            translate_s body (fun () -> IR.CallCont (finally, [rest; "_"]))
-              ek' bks' cks' rk'))) in
+      IR.LetCont (rethrow, e :: rethrow_parameters, ek e rethrow_env,
+        IR.LetCont (return, v :: return_parameters, rk v return_env,
+          IR.LetCont (finally, c :: x :: finally_parameters,
+                      translate_s finally_stmt finally_env
+                        (mkcont1 c x) ek bks cks rk,
+            translated_body))) in
+    let middle =
+      List.fold_left2
+        (fun body name (_, ck) ->
+          let (env, parameters) = fresh_env env in
+          IR.LetCont (name, "_" :: parameters, ck "_" env, body))
+        inner continue_names cks in
     let outer =
-      List.fold_left2 (fun body name (label, k) ->
-                         IR.LetCont (name, [], k (), body))
-        inner c_names cks in
-    let outer' =
-      List.fold_left2 (fun body name (label, k) ->
-                         IR.LetCont (name, [], k (), body))
-        outer b_names bks in
-    IR.LetCont (rest, [], translate_s next k ek bks cks rk, outer')
+      List.fold_left2
+        (fun body name (_, bk) ->
+          let (env, parameters) = fresh_env env in
+          IR.LetCont (name, "_" :: parameters, bk "_" env, body))
+        middle break_names bks in
+    IR.LetCont (rest, rest_parameters, translate_s next rest_env k ek bks cks rk,
+      outer)
                                 
-let translate_one stmt =
-  (reset_gensym ();
-   translate_s stmt  (fun () -> IR.CallCont ("return", ["null"]))
-     (fun e -> IR.CallCont ("throw", [e]))
-     [] [] (fun v -> IR.CallCont ("return", [v])))
+let translate_one stmt env =
+  translate_s stmt env
+    (fun env -> IR.CallCont ("return", ["null"]))
+    (fun e env -> IR.CallCont ("throw", [e]))
+    [] [] (fun v env -> IR.CallCont ("return", [v]))
 
 let translate_fun = function
-  | AST.Sync (name, args, body) ->
-    IR.FunDecl (name, args, "return", "throw", translate_one body)
-  | AST.Async (name, args, body) ->
+  | AST.Sync (name, parameters, locals, body) ->
+    let _ = reset_gensym () in
+    let translated_body = translate_one body (initial_env parameters locals) in
+    let wrapped_body =
+      List.fold_right (fun local expr -> IR.LetVal (local, IR.Constant 0, expr))
+        locals translated_body in
+    IR.FunDecl (name, parameters, "return", "throw", wrapped_body)
+  | AST.Async (name, parameters, locals, body) ->
     (* TODO(kmillikin): There is a bug in this translation.  It needs a
        'new Future(() {...})' somewhere. *)
+    let _ = reset_gensym () in
     let return = gensym "return" in
     let cont = gensym "cont" in
     let c = gensym "completer" in
     let translated_body =
-      translate_s body
-        (fun () -> IR.CallFun ("complete", ["completer"; "null"], return))
-        (fun e -> IR.CallFun ("completeError", ["completer"; e], return))
+      translate_s body (initial_env parameters locals)
+        (fun env -> IR.CallFun ("complete", ["completer"; "null"], return))
+        (fun e env -> IR.CallFun ("completeError", ["completer"; e], return))
         [] []
-        (fun v -> IR.CallFun ("complete", ["completer"; v], return)) in
+        (fun v env -> IR.CallFun ("complete", ["completer"; v], return)) in
     let future_body =
       IR.LetCont (return, ["_"], IR.CallFun ("get future", [c], "return"),
         IR.LetCont (cont, [c], translated_body,
           IR.CallFun("new Completer", [], cont))) in
-    IR.FunDecl (name, args, "return", "throw", future_body)
+    IR.FunDecl (name, parameters, "return", "throw", future_body)
       
 
 let test0 =
@@ -270,16 +326,17 @@ f() async {
 *)
 
 let simple_await' =
-  AST.Async ("f", [],
+  AST.Async ("f", [], [],
     block
       [expression_stmt (AST.Call ("print", [AST.Constant 65]));
        expression_stmt (AST.Call ("print", [AST.Await (AST.Call ("g", [AST.Constant 66]))]))])
 
 let simple_await =
-  block
-    [expression_stmt (AST.Call ("print", [AST.Constant 65]));
-     expression_stmt (AST.Assignment ("b", AST.Await (AST.Call ("g", [AST.Constant 66]))));
-     expression_stmt (AST.Call ("print", [AST.Variable "b"]))]
+  AST.Async ("f", [], ["b"],
+    block
+      [expression_stmt (AST.Call ("print", [AST.Constant 65]));
+       expression_stmt (AST.Assignment ("b", AST.Await (AST.Call ("g", [AST.Constant 66]))));
+       expression_stmt (AST.Call ("print", [AST.Variable "b"]))])
 
 (*
 f() async {
@@ -292,10 +349,11 @@ g(n) async { return n; }
 *)
 
 let await_with_return =
-  block
-    [return_stmt
-        (AST.Call ("add", [AST.Await (AST.Call ("g", [AST.Constant 42]));
-                           AST.Await (AST.Call ("g", [AST.Constant 4711]))]))]
+  AST.Async ("f", [], [],
+    block
+      [return_stmt
+          (AST.Call ("add", [AST.Await (AST.Call ("g", [AST.Constant 42]));
+                             AST.Await (AST.Call ("g", [AST.Constant 4711]))]))])
 
 (*
 =Await multiple returns & throw =
@@ -316,10 +374,71 @@ h(n) async { print(n); throw n; }
 *)
 
 let await_multiple_ =
-  AST.Async ("f", [],
+  AST.Async ("f", [], [],
     block
       [try_finally_stmt
           (block [expression_stmt (AST.Await (AST.Constant 5));
                   return_stmt (AST.Constant 42)])
           (block [expression_stmt (AST.Await (AST.Constant 6));
                   return_stmt (AST.Constant 4711)])])
+
+(* Continuation parameters on branching control flow. *)
+let branching0 =
+  AST.Sync ("f", [], ["x"],
+    block
+      [if_stmt (AST.Variable "x")
+          (block [expression_stmt (AST.Assignment ("x", AST.Constant 0))])
+          (block [expression_stmt (AST.Assignment ("x", AST.Constant 1))]);
+       return_stmt (AST.Variable "x")])
+
+let branching1 =
+  AST.Sync ("f", [], ["x"],
+    block
+      [if_stmt (AST.Variable "x")
+          (block [expression_stmt (AST.Assignment ("x", AST.Constant 0))])
+          (block []);
+       return_stmt (AST.Variable "x")])
+
+let branching2 =
+  AST.Sync ("f", [], ["x"],
+    block
+      [if_stmt (AST.Variable "x")
+          (block [])
+          (block [expression_stmt (AST.Assignment ("x", AST.Constant 1))]);
+       return_stmt (AST.Variable "x")])
+
+let branching3 =
+  AST.Sync ("f", [], ["x"; "y"],
+   block
+     [if_stmt (AST.Variable "x")
+         (block [expression_stmt (AST.Assignment ("x", AST.Constant 0));
+                 expression_stmt (AST.Assignment ("y", AST.Constant 1))])
+         (block [expression_stmt (AST.Assignment ("y", AST.Constant 0));
+                 expression_stmt (AST.Assignment ("x", AST.Constant 1))]);
+      return_stmt (AST.Variable "x")])
+
+let looping0 =
+  AST.Sync ("f", [], ["x"; "y"],
+    block
+      [while_stmt "label" (AST.Variable "x")
+          (block [expression_stmt (AST.Assignment ("x", AST.Constant 0));
+                  expression_stmt (AST.Assignment ("y", AST.Constant 1))]);
+       return_stmt (AST.Variable "x")])
+
+let looping1 =
+  AST.Sync ("f", [], ["x"; "y"],
+    block
+      [while_stmt "label" (AST.Variable "x")
+          (block [expression_stmt (AST.Assignment ("x", AST.Constant 0));
+                  expression_stmt (AST.Assignment ("y", AST.Constant 1));
+                  continue_stmt "label"]);
+       return_stmt (AST.Variable "x")])
+
+let looping2 =
+  AST.Sync ("f", [], ["x"; "y"],
+    block
+      [while_stmt "label" (AST.Variable "x")
+          (block [expression_stmt (AST.Assignment ("x", AST.Constant 0));
+                  expression_stmt (AST.Assignment ("y", AST.Constant 1));
+                  break_stmt "label"]);
+       return_stmt (AST.Variable "x")])
