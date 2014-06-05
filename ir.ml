@@ -1,6 +1,6 @@
 type value =
   | Constant of int
-  | Fun of string list * string * expression
+  | Fun of string list * string * string * expression
     (* Values used to implement yield and yield*. *)
   | Done
   | Single of string * string
@@ -11,7 +11,7 @@ type value =
 and expression =
   | LetVal of string * value * expression
   | LetCont of string * string list * expression * expression
-  | CallFun of string * string list * string
+  | CallFun of string * string list * string * string
   | CallCont of string * string list
   | If of string * string * string
 

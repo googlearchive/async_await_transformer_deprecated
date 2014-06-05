@@ -33,9 +33,13 @@ let rec translate_e expr env k ek =
     | AST.Call (name, args) ->
       let c = gensym "cont" in
       let v = gensym "v" in
+      let throw = gensym "throw" in
+      let e = gensym "e" in
       translate_args args env
         (fun vs env ->
-          IR.LetCont (c, [v], k v env, IR.CallFun (name, vs, c)))
+          IR.LetCont (c, [v], k v env,
+            IR.LetCont (throw, [e], ek e env,
+              IR.CallFun (name, vs, c, throw))))
         ek
     | AST.Throw expr ->
       translate_e expr env ek ek
@@ -99,7 +103,7 @@ let rec translate_s stmt env k ek bks cks rk =
       let v = gensym "v" in
       translate_e expr env
         (fun current env ->
-          IR.LetVal (moveNext, IR.Fun ([], "return",
+          IR.LetVal (moveNext, IR.Fun ([], "return", "throw",
                                        translate_s next env k ek bks cks rk),
                      IR.LetVal (v, IR.Single (current, moveNext),
                                 rk v env))) ek
@@ -108,7 +112,7 @@ let rec translate_s stmt env k ek bks cks rk =
       let v = gensym "v" in
       translate_e expr env
         (fun current env ->
-          IR.LetVal (moveNext, IR.Fun ([], "return",
+          IR.LetVal (moveNext, IR.Fun ([], "return", "throw",
                                        translate_s next env k ek bks cks rk),
                      IR.LetVal (v, IR.Nested (current, moveNext),
                                 rk v env))) ek
@@ -238,8 +242,8 @@ let translate_fun = function
         [] []
         (fun v env -> IR.CallCont ("return", [v])) in
     IR.FunDecl (name, parameters, "return", "throw",
-      IR.LetVal (f, IR.Fun ([], "return", translated_body),
-        IR.CallFun("new NestedIterable", [f], "return")))
+      IR.LetVal (f, IR.Fun ([], "return", "throw", translated_body),
+        IR.CallFun("new NestedIterable", [f], "return", "throw")))
 
   | AST.Async (name, parameters, locals, body) ->
     let _ = reset_gensym () in
@@ -247,10 +251,12 @@ let translate_fun = function
     let translated_body =
       translate_s body (initial_env parameters locals)
         (fun env ->
-          IR.CallFun ("complete", ["completer"; "null"], "return"))
-        (fun e env -> IR.CallFun ("completeError", ["completer"; e], "return"))
+          IR.CallFun ("complete", ["completer"; "null"], "return", "throw"))
+        (fun e env ->
+          IR.CallFun ("completeError", ["completer"; e], "return", "throw"))
         [] []
-        (fun v env -> IR.CallFun ("complete", ["completer"; v], "return")) in
+        (fun v env ->
+          IR.CallFun ("complete", ["completer"; v], "return", "throw")) in
     IR.FunDecl (name, parameters, "return", "throw",
-      IR.LetVal (f, IR.Fun (["completer"], "return", translated_body),
-        IR.CallFun("new AsyncFuture", [f], "return")))
+      IR.LetVal (f, IR.Fun (["completer"], "return", "throw", translated_body),
+        IR.CallFun("new AsyncFuture", [f], "return", "throw")))
