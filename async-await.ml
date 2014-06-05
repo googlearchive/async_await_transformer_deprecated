@@ -1,25 +1,25 @@
 module AST =
 struct
   type expression =
-  | Constant of int
-  | Variable of string
-  | Assignment of string * expression
-  | Call of string * expression list
-  | Throw of expression
-  | Await of expression
+    | Constant of int
+    | Variable of string
+    | Assignment of string * expression
+    | Call of string * expression list
+    | Throw of expression
+    | Await of expression
   (* | Yield of expression *)
 
   type statement =
-  | NoStatement
-  | Expression of expression * statement
-  | Return of expression * statement
-  | If of expression * statement * statement * statement
-  | Label of string * statement * statement
-  | Break of string * statement
-  | While of string * expression * statement * statement
-  | Continue of string * statement
-  | TryCatch of statement * string * statement * statement
-  | TryFinally of statement * statement * statement
+    | NoStatement
+    | Expression of expression * statement
+    | Return of expression * statement
+    | If of expression * statement * statement * statement
+    | Label of string * statement * statement
+    | Break of string * statement
+    | While of string * expression * statement * statement
+    | Continue of string * statement
+    | TryCatch of statement * string * statement * statement
+    | TryFinally of statement * statement * statement
   (* | Switch of expression * cases *)
   (* and cases = *)
   (* | NoCases *)
@@ -46,15 +46,15 @@ let block stmts =
 module IR =
 struct
   type value =
-  | Constant of int
+    | Constant of int
 
   and expression =
-  | LetVal of string * value * expression
-  | LetCont of string * string list * expression * expression
-  | CallFun of string * string list * string
-  | CallCont of string * string list
-  | If of string * string * string
-  | Await of string * string * string
+    | LetVal of string * value * expression
+    | LetCont of string * string list * expression * expression
+    | CallFun of string * string list * string
+    | CallCont of string * string list
+    | If of string * string * string
+    | Await of string * string * string
 
   type function_declaration =
     | FunDecl of string * string list * string * string * expression
@@ -169,10 +169,10 @@ let rec translate_s stmt env k ek bks cks rk =
     let (break_env, break_parameters) = fresh_env env in
     let not_taken = gensym "not_taken" in
     let body = gensym "body" in
-    IR.LetCont (loop, loop_parameters,
+    IR.LetCont (loop, "_" :: loop_parameters,
                 translate_e expr loop_env
                   (fun v body_env ->
-                    IR.LetCont (break, break_parameters,
+                    IR.LetCont (break, "_" :: break_parameters,
                                 translate_s next break_env k ek bks cks rk,
                       IR.LetCont (not_taken, [], (mkcont break) body_env,
                         IR.LetCont (body, [], translate_s stmt body_env
@@ -181,7 +181,7 @@ let rec translate_s stmt env k ek bks cks rk =
                                                 ((label, mkcont1 loop) :: cks)
                                                 rk,
                           IR.If (v, body, not_taken))))) ek,
-      (mkcont loop) env)
+      (mkcont1 loop "_") env)
   | AST.Continue (label, next) ->
     List.assoc label cks "_" env
   | AST.TryCatch (body, id, catch_stmt, next) ->
