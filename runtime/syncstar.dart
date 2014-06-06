@@ -80,4 +80,6 @@ class Flatten extends Iterator {
     var result = continuation();
     return result.moveNext(this);
   }
+
+  void dispose() { _stack = []; _current = null; }
 }
