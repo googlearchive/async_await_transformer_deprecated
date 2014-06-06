@@ -126,7 +126,10 @@ class _Ast2SexpVisitor extends ast.GeneralizingAstVisitor {
   }
 
   visitAssignmentExpression(ast.AssignmentExpression node) {
-    return ['Assignment', visit(node.leftHandSide),
+    if (node.leftHandSide is! ast.SimpleIdentifier) {
+      giveup('non-simple rhs in assignment');
+    }
+    return ['Assignment', (node.leftHandSide as ast.SimpleIdentifier).name,
             visit(node.rightHandSide)];
   }
 
