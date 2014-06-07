@@ -80,3 +80,19 @@ and read_sexp chan =
   match peek_char chan with
     | '(' -> Slist (read_list chan)
     | _ -> Atom (read_atom chan)
+
+
+(* ==== Writing S-expressions ==== *)
+let write_atom = output_string
+
+let rec write_list chan lst =
+  let rec loop = function
+    | [] -> output_string chan ")"
+    | [last] -> write_sexp chan last; output_string chan ")"
+    | hd :: tl -> write_sexp chan hd; output_string chan " "; loop tl
+  in
+  output_string chan "("; loop lst
+
+and write_sexp chan = function
+  | Atom atom -> write_atom chan atom
+  | Slist slist -> write_list chan slist

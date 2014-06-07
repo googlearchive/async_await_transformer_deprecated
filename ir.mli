@@ -17,3 +17,6 @@ and expression =
 
 type function_declaration =
   | FunDecl of string * string list * string * string * expression
+
+(* Pass an output channel, e.g., 'stdout' or 'open_out "filename"'. *)
+val write_ir : out_channel -> function_declaration list -> unit
