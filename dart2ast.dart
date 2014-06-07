@@ -144,7 +144,7 @@ class _Ast2SexpVisitor extends ast.GeneralizingAstVisitor {
       tag = 'Await';
     } else if (name == 'yield') {
       tag = 'Yield';
-    } else if (name == 'yield_star') {
+    } else if (name == 'yieldStar') {
       tag = 'YieldStar';
     }
 
@@ -179,7 +179,13 @@ class _Ast2SexpVisitor extends ast.GeneralizingAstVisitor {
   }
 
   visitExpressionStatement(ast.ExpressionStatement node) {
-    return ['Expression', visit(node.expression), 'NoStatement'];
+    List expression = visit(node.expression);
+    if (['Yield', 'YieldStar'].contains(expression.first)) {
+      // Yield and YieldStar are statements, not expressions.
+      return expression..add('NoStatement');
+    } else {
+      return ['Expression', visit(node.expression), 'NoStatement'];
+    }
   }
 
   visitReturnStatement(ast.ReturnStatement node) {

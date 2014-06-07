@@ -45,3 +45,6 @@ val try_catch_stmt : statement -> string -> statement -> statement -> statement
 val try_finally_stmt : statement -> statement -> statement -> statement
 
 val block : (statement -> statement) list -> statement
+
+(* Pass an input channel, e.g., 'stdin' or 'open_in "filename"'. *)
+val read_asts : in_channel -> function_declaration list
