@@ -3,8 +3,8 @@ type value =
   | Fun of string list * string * string * expression
     (* Values used to implement yield and yield*. *)
   | Done
-  | Single of string * string
-  | Nested of string * string
+  | Single of string * string * string
+  | Nested of string * string * string
     (* Values used to implement await. *)
   | Await of string * string * string
       
@@ -30,10 +30,10 @@ let rec serialize_value = function
     Slist [Atom "Fun"; serialize_string_list parameters; Atom return;
 	   Atom throw; serialize_expression body]
   | Done -> Atom "Done"
-  | Single (value, moveNext) ->
-    Slist [Atom "Single"; Atom value; Atom moveNext]
-  | Nested (value, moveNext) ->
-    Slist [Atom "Nested"; Atom value; Atom moveNext]
+  | Single (value, moveNext, dispose) ->
+    Slist [Atom "Single"; Atom value; Atom moveNext; Atom dispose]
+  | Nested (value, moveNext, dispose) ->
+    Slist [Atom "Nested"; Atom value; Atom moveNext; Atom dispose]
   | Await (value, moveNext, cancel) ->
     Slist [Atom "Await"; Atom value; Atom moveNext; Atom cancel]
 

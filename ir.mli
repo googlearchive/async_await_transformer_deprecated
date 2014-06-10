@@ -3,8 +3,8 @@ type value =
   | Fun of string list * string * string * expression
     (* Values used to implement yield and yield*. *)
   | Done
-  | Single of string * string
-  | Nested of string * string
+  | Single of string * string * string
+  | Nested of string * string * string
     (* Values used to implement await. *)
   | Await of string * string * string
       
