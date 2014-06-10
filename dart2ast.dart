@@ -13,16 +13,16 @@ main(List<String> args) {
 
   String path = args.first;
   ast.CompilationUnit compilationUnit = ast.parseDartFile(path);
-  _Ast2SexpVisitor visitor = new _Ast2SexpVisitor();
-  print(_sexp2Doc(compilationUnit.accept(visitor)).render(120));
+  Ast2SexpVisitor visitor = new Ast2SexpVisitor();
+  print(sexp2Doc(compilationUnit.accept(visitor)).render(120));
 }
 
 
-_sexp2Doc(expression) {
+pretty.Document sexp2Doc(expression) {
   if (expression is String) return pretty.text(expression);
   if ((expression as List).isEmpty) return pretty.text('()');
 
-  Iterable<pretty.Document> docs = (expression as List).map(_sexp2Doc);
+  Iterable<pretty.Document> docs = (expression as List).map(sexp2Doc);
   pretty.Document result = pretty.text('(') + docs.first;
   pretty.Document children =
       docs.skip(1).fold(pretty.empty,
@@ -36,7 +36,7 @@ _sexp2Doc(expression) {
 ///
 /// An S-expression is an atom (string in this case) or a list of
 /// S-expressions.
-class _Ast2SexpVisitor extends ast.GeneralizingAstVisitor {
+class Ast2SexpVisitor extends ast.GeneralizingAstVisitor {
   giveup(String why) {
     print('Unsupported syntax: $why.');
     exit(0);

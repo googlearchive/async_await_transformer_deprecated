@@ -276,7 +276,7 @@ let translate_fun: (Ast.function_declaration -> Ir.function_declaration) = funct
         (fun v env -> Ir.CallCont ("return", [v])) in
     Ir.FunDecl (name, parameters, "return", "throw",
       Ir.LetVal (f, Ir.Fun ([], "return", "throw", translated_body),
-        Ir.CallFun("new NestedIterable", [f], "return", "throw")))
+        Ir.CallFun("newNestedIterable", [f], "return", "throw")))
 
   | Ast.Async (name, parameters, locals, body) ->
     let _ = reset_gensym () in
