@@ -213,6 +213,7 @@ let rec translate_s (stmt: Ast.statement) (env: environment)
       let x = gensym "what" in
       let (finally_env, finally_parameters) = fresh_env env in
       (* Wrap the existing continuations to go through finally. *)
+      let rest' = mkcont2 finally rest "_" in
       let ek' = mkcont2 finally rethrow in
       let bks' =
         List.map2 (fun (label, _) name -> (label, mkcont2 finally name "_")) 
@@ -223,7 +224,7 @@ let rec translate_s (stmt: Ast.statement) (env: environment)
       let fk' = mkcont2 finally in
       let rk' = mkcont2 finally return in
       (* Translate the body and wrap layers and layers of continuation bindings *)
-      let translated_body = translate_s body env (mkcont rest) ek' bks' cks' fk' rk' in
+      let translated_body = translate_s body env rest' ek' bks' cks' fk' rk' in
       let inner =
         Ir.LetCont (rethrow, e :: rethrow_parameters, ek e rethrow_env,
           Ir.LetCont (return, v :: return_parameters, rk v return_env,
@@ -243,7 +244,8 @@ let rec translate_s (stmt: Ast.statement) (env: environment)
             let (env, parameters) = fresh_env env in
             Ir.LetCont (name, "_" :: parameters, bk env, body))
           middle break_names bks in
-      Ir.LetCont (rest, rest_parameters, translate_s next rest_env k ek bks cks fk rk,
+      Ir.LetCont (rest, "_" :: rest_parameters,
+                  translate_s next rest_env k ek bks cks fk rk,
         outer)
                                 
 let translate_one (stmt: Ast.statement) (env: environment): Ir.expression =
