@@ -90,22 +90,16 @@ class Ast2SexpVisitor extends ast.GeneralizingAstVisitor {
     }
 
     bool first = true;
-    List body, current;
+    List body = [];
     for (ast.Statement s in block.statements) {
-      if (first && s is ast.VariableDeclarationStatement) {
-        // Skip an initial variable declaration statement.
-        first = false;
-        continue;
+      // Skip an initial variable declaration statement.
+      if (!first || s is! ast.VariableDeclarationStatement) {
+        body.add(visit(s));
       }
       first = false;
-      if (current == null) {
-        current = body = visit(s);
-      } else {
-        current = current[current.length - 1] = visit(s);
-      }
     }
 
-    return [tag, name, parameters, locals, body];
+    return [tag, name, parameters, locals, ['Block', body]];
   }
 
   visitSimpleFormalParameter(ast.SimpleFormalParameter node) {
