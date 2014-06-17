@@ -253,7 +253,7 @@ let translate_one (stmt: Ast.statement) (env: environment): Ir.expression =
     (fun env -> Ir.CallCont ("return", ["null"]))
     (fun e env -> Ir.CallCont ("throw", [e]))
     [] []
-    (fun what where env -> Ir.CallCont(where, [what]))
+    (fun where what env -> Ir.CallCont(where, [what]))
     (fun v env -> Ir.CallCont ("return", [v]))
 
 let translate_fun: (Ast.function_declaration -> Ir.function_declaration) = function
@@ -274,7 +274,7 @@ let translate_fun: (Ast.function_declaration -> Ir.function_declaration) = funct
           let v = gensym "v" in Ir.LetVal (v, Ir.Done, Ir.CallCont ("return", [v])))
         (fun e env -> Ir.CallCont ("throw", [e]))
         [] []
-        (fun what where env -> Ir.CallCont(where, [what]))
+        (fun where what env -> Ir.CallCont(where, [what]))
         (fun v env -> Ir.CallCont ("return", [v])) in
     Ir.FunDecl (name, parameters, "return", "throw",
       Ir.LetVal (f, Ir.Fun ([], "return", "throw", translated_body),
@@ -290,7 +290,7 @@ let translate_fun: (Ast.function_declaration -> Ir.function_declaration) = funct
         (fun e env ->
           Ir.CallFun ("completeError", ["completer"; e], "return", "throw"))
         [] []
-        (fun what where env -> Ir.CallCont (where, [what]))
+        (fun where what env -> Ir.CallCont (where, [what]))
         (fun v env ->
           Ir.CallFun ("complete", ["completer"; v], "return", "throw")) in
     Ir.FunDecl (name, parameters, "return", "throw",
