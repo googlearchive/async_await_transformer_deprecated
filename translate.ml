@@ -106,64 +106,65 @@ let rec translate_s (stmt: Ast.statement) (env: environment)
     (fk: finally_cont)
     (rk: return_cont): Ir.expression =
   match stmt with
-    | Ast.NoStatement ->
+    | Ast.EmptyStatement ->
       k env
-    | Ast.Expression (expr, next) ->
-      translate_e expr env
-        (fun v env -> translate_s next env k ek bks cks fk rk) ek
-    | Ast.Return (expr, next) ->
+    | Ast.Block stmts ->
+      translate_body stmts env k ek bks cks fk rk
+    | Ast.Expression expr ->
+      translate_e expr env (fun v env -> k env) ek
+    | Ast.Return expr ->
       translate_e expr env rk ek
-    | Ast.YieldBreak next ->
+    | Ast.YieldBreak ->
       let d = gensym "done" in
       Ir.LetVal (d, Ir.Done, fk "return" d env)
-    | Ast.Yield (expr, next) ->
+    | Ast.Yield expr ->
       let moveNext = gensym "moveNext" in
       let v = gensym "v" in
       let dispose = gensym "dispose" in
       translate_e expr env
         (fun current env ->
-          Ir.LetVal (moveNext, Ir.Fun ([], "return", "throw",
-                                       translate_s next env k ek bks cks fk rk),
-            Ir.LetVal (dispose, Ir.Fun ([], "return", "throw",
-                                        let d = gensym "done" in
-                                        Ir.LetVal (d, Ir.Done,
-                                          fk "return" d env)),
+          Ir.LetVal (moveNext, Ir.Fun ([], "return", "throw", k env),
+            Ir.LetVal (dispose,
+                       Ir.Fun ([], "return", "throw",
+                         let d = gensym "done" in
+                         Ir.LetVal (d, Ir.Done,
+                           fk "return" d env)),
               Ir.LetVal (v, Ir.Single (current, moveNext, dispose),
                 Ir.CallCont ("return", [v]))))) ek
-    | Ast.YieldStar (expr, next) ->
+    | Ast.YieldStar expr ->
       let moveNext = gensym "moveNext" in
       let v = gensym "v" in
       let dispose = gensym "dispose" in
       translate_e expr env
         (fun current env ->
-          Ir.LetVal (moveNext, Ir.Fun ([], "return", "throw",
-                                       translate_s next env k ek bks cks fk rk),
-            Ir.LetVal (dispose, Ir.Fun ([], "return", "throw",
-                                        let d = gensym "done" in
-                                        Ir.LetVal (d, Ir.Done,
-                                          fk "return" d env)),
+          Ir.LetVal (moveNext, Ir.Fun ([], "return", "throw", k env),
+            Ir.LetVal (dispose,
+                       Ir.Fun ([], "return", "throw",
+                         let d = gensym "done" in
+                         Ir.LetVal (d, Ir.Done,
+                           fk "return" d env)),
               Ir.LetVal (v, Ir.Nested (current, moveNext, dispose),
                 Ir.CallCont ("return", [v]))))) ek
-    | Ast.If (expr, thn, els, next) ->
+    | Ast.If (expr, thn, els) ->
       let join = gensym "join" in
       let (join_env, join_parameters) = fresh_env env in
       let if_true = gensym "then" in
       let if_false = gensym "else" in
       translate_e expr env
         (fun v env ->
-	  Ir.LetCont (join, join_parameters, translate_s next join_env k ek bks cks fk rk,
+	  Ir.LetCont (join, join_parameters, k join_env,
             Ir.LetCont (if_true, [], translate_s thn env (mkcont join) ek bks cks fk rk,
               Ir.LetCont (if_false, [], translate_s els env (mkcont join) ek bks cks fk rk,
                 Ir.If (v, if_true, if_false)))))
         ek
-    | Ast.Label (label, stmt, next) ->
+    | Ast.Label (label, stmt) ->
       let break = gensym "break" in
       let (break_env, break_parameters) = fresh_env env in
-      Ir.LetCont (break, break_parameters, translate_s next break_env k ek bks cks fk rk,
-                  translate_s stmt env (mkcont1 break "_") ek ((label, mkcont break) :: bks) cks fk rk)
-    | Ast.Break (label, next) ->
+      Ir.LetCont (break, break_parameters, k break_env,
+        translate_s stmt env (mkcont1 break "_") ek ((label, mkcont break) :: bks) cks fk rk)
+    | Ast.Break label ->
       List.assoc label bks env
-    | Ast.While (label, expr, stmt, next) ->
+    | Ast.While (label, expr, stmt) ->
       let loop = gensym "continue" in
       let (loop_env, loop_parameters) = fresh_env env in
       let break = gensym "break" in
@@ -173,30 +174,29 @@ let rec translate_s (stmt: Ast.statement) (env: environment)
       Ir.LetCont (loop, loop_parameters,
                   translate_e expr loop_env
                     (fun v body_env ->
-                      Ir.LetCont (break, break_parameters,
-                                  translate_s next break_env k ek bks cks fk rk,
-                                  Ir.LetCont (not_taken, [], (mkcont break) body_env,
-                                    Ir.LetCont (body, [], translate_s stmt body_env
-                                                            (mkcont loop) ek
-                                                            ((label, mkcont break) :: bks)
-                                                            ((label, mkcont loop) :: cks)
-                                                            fk
-                                                            rk,
-                                      Ir.If (v, body, not_taken))))) ek,
-        (mkcont loop) env)
-    | Ast.Continue (label, next) ->
+                      Ir.LetCont (break, break_parameters, k break_env,
+                        Ir.LetCont (not_taken, [], (mkcont break) body_env,
+                          Ir.LetCont (body, [], translate_s stmt body_env
+                                                  (mkcont loop) ek
+                                                  ((label, mkcont break) :: bks)
+                                                  ((label, mkcont loop) :: cks)
+                                                  fk
+                                                  rk,
+                            Ir.If (v, body, not_taken))))) ek,
+        mkcont loop env)
+    | Ast.Continue label ->
       List.assoc label cks env
-    | Ast.TryCatch (body, id, catch_stmt, next) ->
+    | Ast.TryCatch (body, id, catch_stmt) ->
       let rest = gensym "rest" in
       let (rest_env, rest_parameters) = fresh_env env in
       let throw = gensym "throw" in
       let e = gensym "e" in
       let (throw_env, throw_parameters) = fresh_env env in
-      Ir.LetCont (rest, rest_parameters, translate_s next rest_env k ek bks cks fk rk,
+      Ir.LetCont (rest, rest_parameters, k rest_env,
         Ir.LetCont (throw, e :: throw_parameters,
                     translate_s catch_stmt throw_env (mkcont rest) ek bks cks fk rk,
           translate_s body env (mkcont rest) (mkcont1 throw) bks cks fk rk))
-    | Ast.TryFinally (body, finally_stmt, next) ->
+    | Ast.TryFinally (body, finally_stmt) ->
       (* Names for all the introduced continuations and parameters. *)
       let rest = gensym "rest" in
       let (rest_env, rest_parameters) = fresh_env env in
@@ -244,9 +244,20 @@ let rec translate_s (stmt: Ast.statement) (env: environment)
             let (env, parameters) = fresh_env env in
             Ir.LetCont (name, "_" :: parameters, bk env, body))
           middle break_names bks in
-      Ir.LetCont (rest, "_" :: rest_parameters,
-                  translate_s next rest_env k ek bks cks fk rk,
+      Ir.LetCont (rest, "_" :: rest_parameters, k rest_env,
         outer)
+
+and translate_body (stmts: Ast.statement list) (env: environment)
+    (k: statement_cont)
+    (ek: exception_cont)
+    (bks: (string * jump_cont) list)
+    (cks: (string * jump_cont) list)
+    (fk: finally_cont)
+    (rk: return_cont): Ir.expression =
+  match stmts with
+    | [] -> k env
+    | stmt :: stmts ->
+      translate_s stmt env (fun env -> translate_body stmts env k ek bks cks fk rk) ek bks cks fk rk
                                 
 let translate_one (stmt: Ast.statement) (env: environment): Ir.expression =
   translate_s stmt env

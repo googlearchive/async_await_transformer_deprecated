@@ -164,27 +164,17 @@ class Ast2SexpVisitor extends ast.GeneralizingAstVisitor {
 
   // ==== Statements ====
   visitBlock(ast.Block node) {
-    // Blocks can occur as bodies in if/else, while, try/catch/finally, etc.
-    // Since statements in the output are really linked lists of statements
-    // terminated by NoStatement, blocks are 'flattened'.
-    List result, current;
-    for (ast.Statement s in node.statements) {
-      if (current == null) {
-        current = result = visit(s);
-      } else {
-        current = current[current.length - 1] = visit(s);
-      }
-    }
-    return result;
+    List body = node.statements.map(visit).toList(growable: false);
+    return ['Block', body];
   }
 
   visitExpressionStatement(ast.ExpressionStatement node) {
     List expression = visit(node.expression);
     if (['Yield', 'YieldStar'].contains(expression.first)) {
       // Yield and YieldStar are statements, not expressions.
-      return expression..add('NoStatement');
+      return expression;
     } else {
-      return ['Expression', visit(node.expression), 'NoStatement'];
+      return ['Expression', visit(node.expression)];
     }
   }
 
@@ -192,14 +182,14 @@ class Ast2SexpVisitor extends ast.GeneralizingAstVisitor {
     // A subexpression is required for return, except for a return from a
     // sync* function, which should have no subexpression.
     return node.expression == null
-        ? ['YieldBreak', 'NoStatement']
-        : ['Return', visit(node.expression), 'NoStatement'];
+        ? ['YieldBreak']
+        : ['Return', visit(node.expression)];
   }
 
   visitIfStatement(ast.IfStatement node) {
     if (node.elseStatement == null) giveup('if without an else');
     return ['If', visit(node.condition), visit(node.thenStatement),
-            visit(node.elseStatement), 'NoStatement'];
+            visit(node.elseStatement)];
   }
 
   visitLabeledStatement(ast.LabeledStatement node) {
@@ -212,25 +202,24 @@ class Ast2SexpVisitor extends ast.GeneralizingAstVisitor {
       statement[1] = label;
       return statement;
     } else {
-      return ['Label', label, statement, 'NoStatement'];
+      return ['Label', label, statement];
     }
   }
 
   visitBreakStatement(ast.BreakStatement node) {
     if (node.label == null) giveup('break without a label');
-    return ['Break', node.label.name, 'NoStatement'];
+    return ['Break', node.label.name];
   }
 
   visitWhileStatement(ast.WhileStatement node) {
     // There is a null placeholder for the statement's label.  It is filled
     // in by the caller.
-    return ['While', null, visit(node.condition), visit(node.body),
-            'NoStatement'];
+    return ['While', null, visit(node.condition), visit(node.body)];
   }
 
   visitContinueStatement(ast.ContinueStatement node) {
     if (node.label == null) giveup('continue without a label');
-    return ['Continue', node.label.name, 'NoStatement'];
+    return ['Continue', node.label.name];
   }
 
   visitTryStatement(ast.TryStatement node) {
@@ -250,13 +239,12 @@ class Ast2SexpVisitor extends ast.GeneralizingAstVisitor {
     if (node.catchClauses.isEmpty) {
       // This is probably impossible:
       if (node.finallyBlock == null) giveup('try without catch or finally');
-      return ['TryFinally', visit(node.body), visit(node.finallyBlock),
-              'NoStatement'];
+      return ['TryFinally', visit(node.body), visit(node.finallyBlock)];
     } else if (node.catchClauses.length == 1) {
       if (node.finallyBlock != null) giveup('try/catch/finally');
       ast.CatchClause clause = node.catchClauses.first;
       return ['TryCatch', visit(node.body), clause.exceptionParameter.name,
-              visit(clause.body), 'NoStatement'];
+              visit(clause.body)];
     } else {
       giveup('multiple catch clauses');
     }

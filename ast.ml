@@ -7,19 +7,20 @@ type expression =
   | Await of expression
       
 type statement =
-  | NoStatement
-  | Expression of expression * statement
-  | Return of expression * statement
-  | YieldBreak of statement  (* Return in a sync* body. *)
-  | Yield of expression * statement
-  | YieldStar of expression * statement
-  | If of expression * statement * statement * statement
-  | Label of string * statement * statement
-  | Break of string * statement
-  | While of string * expression * statement * statement
-  | Continue of string * statement
-  | TryCatch of statement * string * statement * statement
-  | TryFinally of statement * statement * statement
+  | EmptyStatement
+  | Block of statement list
+  | Expression of expression
+  | Return of expression
+  | YieldBreak  (* Return in a sync* body. *)
+  | Yield of expression
+  | YieldStar of expression
+  | If of expression * statement * statement
+  | Label of string * statement
+  | Break of string
+  | While of string * expression * statement
+  | Continue of string
+  | TryCatch of statement * string * statement
+  | TryFinally of statement * statement
   (* | Switch of expression * cases *)
   (* and cases = *)
   (* | NoCases *)
@@ -29,22 +30,6 @@ type function_declaration =
   | Sync of string * string list * string list * statement
   | SyncStar of string * string list * string list * statement
   | Async of string * string list * string list * statement
-
-let expression_stmt expr rest = Expression (expr, rest)
-let return_stmt expr rest = Return (expr, rest)
-let yield_break_stmt next = YieldBreak next
-let yield_stmt expr next = Yield (expr, next)
-let yield_star_stmt expr next = YieldStar (expr, next)
-let if_stmt expr thn els rest = If (expr, thn, els, rest)
-let label_stmt label stmt rest = Label (label, stmt, rest)
-let break_stmt label rest = Break (label, rest)
-let while_stmt label expr body rest = While (label, expr, body, rest)
-let continue_stmt label rest = Continue (label, rest)
-let try_catch_stmt stmt id catch_stmt rest = TryCatch (stmt, id, catch_stmt, rest)
-let try_finally_stmt stmt finally_stmt rest = TryFinally (stmt, finally_stmt, rest)
-
-let block stmts =
-  List.fold_right (fun stmt acc -> stmt acc) stmts NoStatement
 
 (* ==== Construction from S-expressions ==== *)
 (* The Sexp is assumed to be well-formed, otherwise a pattern match failure
@@ -86,37 +71,30 @@ and build_expression_list = function
   | _ -> failwith "not a list"
 
 let rec build_statement = function
-  | Atom "NoStatement" -> NoStatement
-  | Slist [Atom "Expression"; expr; next] ->
-    Expression (build_expression expr, build_statement next)
-  | Slist [Atom "Return"; expr; next] ->
-    Return (build_expression expr, build_statement next)
-  | Slist [Atom "YieldBreak"; next] ->
-    YieldBreak (build_statement next)
-  | Slist [Atom "Yield"; expr; next] ->
-    Yield (build_expression expr, build_statement next)
-  | Slist [Atom "YieldStar"; expr; next] ->
-    YieldStar (build_expression expr, build_statement next)
-  | Slist [Atom "If"; cond; thn; els; next] ->
-    If (build_expression cond, build_statement thn, build_statement els,
-        build_statement next)
-  | Slist [Atom "Label"; Atom label; stmt; next] ->
-    Label (label, build_statement stmt, build_statement next)
-  | Slist [Atom "Break"; Atom label; next] ->
-    Break (label, build_statement next)
-  | Slist [Atom "While"; Atom label; cond; body; next] ->
-    While (label, build_expression cond, build_statement body,
-           build_statement next)
-  | Slist [Atom "Continue"; Atom label; next] ->
-    Continue (label, build_statement next)
-  | Slist [Atom "TryCatch"; body; Atom exn; catch; next] ->
-    TryCatch (build_statement body, exn, build_statement catch,
-              build_statement next)
-  | Slist [Atom "TryFinally"; body; finally; next] ->
-    TryFinally (build_statement body, build_statement finally,
-                build_statement next)
+  | Atom "EmptyStatement" -> EmptyStatement
+  | Slist [Atom "Block"; statements] -> Block (build_statement_list statements)
+  | Slist [Atom "Expression"; expr] -> Expression (build_expression expr)
+  | Slist [Atom "Return"; expr] -> Return (build_expression expr)
+  | Slist [Atom "YieldBreak"] -> YieldBreak
+  | Slist [Atom "Yield"; expr] -> Yield (build_expression expr)
+  | Slist [Atom "YieldStar"; expr] -> YieldStar (build_expression expr)
+  | Slist [Atom "If"; cond; thn; els] ->
+    If (build_expression cond, build_statement thn, build_statement els)
+  | Slist [Atom "Label"; Atom label; stmt] -> Label (label, build_statement stmt)
+  | Slist [Atom "Break"; Atom label] -> Break (label)
+  | Slist [Atom "While"; Atom label; cond; body] ->
+    While (label, build_expression cond, build_statement body)
+  | Slist [Atom "Continue"; Atom label] -> Continue (label)
+  | Slist [Atom "TryCatch"; body; Atom exn; catch] ->
+    TryCatch (build_statement body, exn, build_statement catch)
+  | Slist [Atom "TryFinally"; body; finally] ->
+    TryFinally (build_statement body, build_statement finally)
   | Slist slist -> failwith (bad_slist_msg "statement" slist)
   | Atom atom -> failwith (bad_atom_msg "statement" atom)
+
+and build_statement_list = function
+  | Slist lst -> List.map build_statement lst
+  | _ -> failwith "not a list"
 
 let build_function_declaration = function
   | Slist [Atom tag; Atom name; parameters; locals; body] ->
