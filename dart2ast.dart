@@ -49,7 +49,7 @@ class Ast2SexpVisitor extends ast.GeneralizingAstVisitor {
   }
 
   visitCompilationUnit(ast.CompilationUnit node) {
-    return node.sortedDirectivesAndDeclarations.map(visit)
+    return node.sortedDirectivesAndDeclarations.reversed.map(visit)
         .toList(growable: false);
   }
 
