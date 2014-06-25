@@ -1,10 +1,6 @@
 type value =
   | Constant of int
   | Fun of string list * string * string * expression
-    (* Values used to implement yield and yield*. *)
-  | Done
-  | Single of string * string * string
-  | Nested of string * string * string
     (* Values used to implement await. *)
   | Await of string * string * string
       
@@ -13,7 +9,7 @@ and expression =
   | LetCont of string * string list * expression * expression
   | CallFun of string * string list * string * string
   | CallCont of string * string list
-  | If of string * string * string
+  | If of string * expression * expression
 
 type function_declaration =
   | FunDecl of string * string list * string * string * expression
@@ -29,13 +25,8 @@ let rec serialize_value = function
   | Fun (parameters, return, throw, body) ->
     Slist [Atom "Fun"; serialize_string_list parameters; Atom return;
 	   Atom throw; serialize_expression body]
-  | Done -> Atom "Done"
-  | Single (value, moveNext, dispose) ->
-    Slist [Atom "Single"; Atom value; Atom moveNext; Atom dispose]
-  | Nested (value, moveNext, dispose) ->
-    Slist [Atom "Nested"; Atom value; Atom moveNext; Atom dispose]
-  | Await (value, moveNext, cancel) ->
-    Slist [Atom "Await"; Atom value; Atom moveNext; Atom cancel]
+  | Await (value, normal, error) ->
+    Slist [Atom "Await"; Atom value; Atom normal; Atom error]
 
 and serialize_expression = function
   | LetVal (name, rhs, body) ->
@@ -50,7 +41,8 @@ and serialize_expression = function
   | CallCont (name, arguments) ->
     Slist [Atom "CallCont"; Atom name; serialize_string_list arguments]
   | If (condition, thn, els) ->
-    Slist [Atom "If"; Atom condition; Atom thn; Atom els]
+    Slist [Atom "If"; Atom condition; serialize_expression thn;
+           serialize_expression els]
 
 let serialize_function_declaration = function
   | FunDecl (name, parameters, return, throw, body) ->

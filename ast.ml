@@ -11,9 +11,6 @@ type statement =
   | Block of statement list
   | Expression of expression
   | Return of expression
-  | YieldBreak  (* Return in a sync* body. *)
-  | Yield of expression
-  | YieldStar of expression
   | If of expression * statement * statement
   | Label of string * statement
   | Break of string
@@ -21,14 +18,9 @@ type statement =
   | Continue of string
   | TryCatch of statement * string * statement
   | TryFinally of statement * statement
-  (* | Switch of expression * cases *)
-  (* and cases = *)
-  (* | NoCases *)
-  (* | Case of string * int * statement * cases *)
 
 type function_declaration =
   | Sync of string * string list * string list * statement
-  | SyncStar of string * string list * string list * statement
   | Async of string * string list * string list * statement
 
 (* ==== Construction from S-expressions ==== *)
@@ -47,7 +39,11 @@ let build_string_list = function
 let bad_atom_msg kind atom = "bad " ^ kind ^ ": " ^ atom
 
 let bad_slist_msg kind slist =
-  "bad " ^ kind ^ ": list[" ^ string_of_int (List.length slist) ^ "]"
+  let msg =
+    "bad " ^ kind ^ ": list[" ^ string_of_int (List.length slist) ^ "]" in
+  match slist with
+    | Atom tag :: _ -> msg ^ " tagged: " ^ tag
+    | _ -> msg
 
 let rec build_expression = function
   | Slist [Atom "Constant"; Atom value] ->
@@ -62,7 +58,6 @@ let rec build_expression = function
     Throw (build_expression expr)
   | Slist [Atom "Await"; expr] ->
     Await (build_expression expr)
-  | Slist (Atom tag :: _) -> failwith ("bad list tagged: " ^ tag)
   | Slist slist -> failwith (bad_slist_msg "expression" slist)
   | Atom atom -> failwith (bad_atom_msg "expression" atom)
 
@@ -75,9 +70,6 @@ let rec build_statement = function
   | Slist [Atom "Block"; statements] -> Block (build_statement_list statements)
   | Slist [Atom "Expression"; expr] -> Expression (build_expression expr)
   | Slist [Atom "Return"; expr] -> Return (build_expression expr)
-  | Slist [Atom "YieldBreak"] -> YieldBreak
-  | Slist [Atom "Yield"; expr] -> Yield (build_expression expr)
-  | Slist [Atom "YieldStar"; expr] -> YieldStar (build_expression expr)
   | Slist [Atom "If"; cond; thn; els] ->
     If (build_expression cond, build_statement thn, build_statement els)
   | Slist [Atom "Label"; Atom label; stmt] -> Label (label, build_statement stmt)
@@ -103,11 +95,10 @@ let build_function_declaration = function
     let body = build_statement body in
     (match tag with
       | "Sync" -> Sync (name, parameters, locals, body)
-      | "SyncStar" -> SyncStar (name, parameters, locals, body)
       | "Async" -> Async (name, parameters, locals, body)
       | _ -> failwith ("unexpected tag " ^ tag))
-  | Slist slist -> failwith (bad_slist_msg "function declaration" slist)
-  | Atom atom -> failwith (bad_atom_msg "function declaration" atom)
+  | Slist slist -> failwith (bad_slist_msg "declaration" slist)
+  | Atom atom -> failwith (bad_atom_msg "declaration" atom)
 
 (* Read an S-expression from standard in, return a list of Asts. *)
 let read_asts chan =
