@@ -229,7 +229,11 @@ let rec translate_s (stmt: Ast.statement) (return: string) (throw: string)
                               translate_s finally_stmt finally_return finally_throw
                                 finally_env rk bks cks ek
                                 (mkcont1 where what),
-                    translate_s body return throw env (mkcont2 finally return) bks
+                    translate_s body return throw env (mkcont2 finally return)
+                      (List.map2
+                         (fun (label, _) break ->
+                           (label, mkcont2 finally break "_"))
+                         bks breaks)
                       (List.map2
                          (fun (label, _) continue ->
                            (label, mkcont2 finally continue "_"))
