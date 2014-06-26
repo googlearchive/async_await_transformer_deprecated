@@ -4,7 +4,7 @@ main_async() {
 
 }
 
-constant_async(x){ return x; }
+constant_async(x){ return x; } 
 
 awaitany_async(a,b) {
    var completer = new Completer()

@@ -10,7 +10,9 @@ main_async() {
 
 }
 
-constant_async(x){ return x; }
+constant_async(x){ 
+ return x; 
+}
 
 awaitall_async(tasks) {
    for(var task in tasks) { 
