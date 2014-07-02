@@ -83,7 +83,7 @@ let rec translate_e (expr: Ast.expression) (return: string) (throw: string)
       translate_e expr return throw env ek
         (fun v return throw env ->
           let cont = gensym "cont" in
-          let v = gensym "v" in
+          let x = gensym "v" in
           let cont_return = gensym "return" in
           let cont_throw = gensym "throw" in
           let error = gensym "error" in
@@ -92,7 +92,7 @@ let rec translate_e (expr: Ast.expression) (return: string) (throw: string)
           let error_throw = gensym "throw" in
           let future = gensym "future" in
           Ir.LetVal (cont,
-                     Ir.Fun ([v], cont_return, cont_throw,
+                     Ir.Fun ([x], cont_return, cont_throw,
                              k v cont_return cont_throw env),
             Ir.LetVal (error,
                        Ir.Fun ([e], error_return, error_throw,
@@ -191,7 +191,7 @@ let rec translate_s (stmt: Ast.statement) (return: string) (throw: string)
       let what = gensym "what" in
       let (finally_env, finally_parameters, finally_return, finally_throw) =
         fresh_env env in
-      let return = gensym "return" in
+      let return' = gensym "return" in
       let v = gensym "v" in
       let (return_env, return_parameters, return_return, return_throw) =
         fresh_env env in
@@ -202,7 +202,7 @@ let rec translate_s (stmt: Ast.statement) (return: string) (throw: string)
       let continues = List.map (fun _ -> gensym "continue") cks in
       Ir.LetCont (join, "_" :: join_return :: join_throw :: join_parameters,
                   k join_return join_throw join_env,
-        Ir.LetCont (return, v :: return_return :: return_throw :: return_parameters,
+        Ir.LetCont (return', v :: return_return :: return_throw :: return_parameters,
                     rk v return_return return_throw return_env,
           List.fold_right2
             (fun name (_, bk) body ->
@@ -229,7 +229,7 @@ let rec translate_s (stmt: Ast.statement) (return: string) (throw: string)
                               translate_s finally_stmt finally_return finally_throw
                                 finally_env rk bks cks ek
                                 (mkcont1 where what),
-                    translate_s body return throw env (mkcont2 finally return)
+                    translate_s body return throw env (mkcont2 finally return')
                       (List.map2
                          (fun (label, _) break ->
                            (label, mkcont2 finally break "_"))
@@ -239,7 +239,7 @@ let rec translate_s (stmt: Ast.statement) (return: string) (throw: string)
                            (label, mkcont2 finally continue "_"))
                          cks continues)
                       (mkcont2 finally catch)
-                      (mkcont2 finally "join" "_")))))))
+                      (mkcont2 finally join "_")))))))
 and translate_body (body: Ast.statement list) (return: string) (throw: string)
     (env: environment)
     (rk: expression_cont)
@@ -254,13 +254,6 @@ and translate_body (body: Ast.statement list) (return: string) (throw: string)
         (fun return throw env ->
           translate_body stmts return throw env rk bks cks ek k)
                                 
-(* let translate_one (stmt: Ast.statement) (env: environment) (rk: string): Ir.expression = *)
-(*   translate_s stmt env *)
-(*     (fun e rk env -> Ir.CallCont ("throw", [e])) *)
-(*     [] [] *)
-(*     (fun where what rk env -> Ir.CallCont(where, [what])) *)
-(*     rk *)
-(*     (fun rk env -> Ir.CallCont (rk, ["null"])) *)
 
 let translate_fun: (Ast.function_declaration -> Ir.function_declaration) = function
   | Ast.Sync (name, parameters, locals, body) ->
@@ -299,7 +292,7 @@ let translate_fun: (Ast.function_declaration -> Ir.function_declaration) = funct
           Ir.LetVal (v, Ir.Constant 0,
             Ir.CallFun ("complete", [completer; v], return, throw))) in
     Ir.FunDecl (name, parameters, "return", "throw",
-      Ir.LetVal (f, Ir.Fun (["completer"], return, throw, translated_body),
+      Ir.LetVal (f, Ir.Fun ([completer], return, throw, translated_body),
         Ir.CallFun("newAsyncFuture", [f], "return", "throw")))
 ;;
 
