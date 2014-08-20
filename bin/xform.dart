@@ -98,6 +98,25 @@ class TransformVisitor extends ast.GeneralizingAstVisitor {
   // TODO: Safely generate fresh identifiers.
   String newName(String base) => '$base${counter++}';
   
+  /// Insert a declaration with initial value [expr] in [currentBlock] and
+  /// return the fresh name.
+  /// 
+  /// No declaration is added if the expression is already a value and [force]
+  /// is false.
+  ast.Expression addDeclaration(String base,
+                                ast.Expression expr,
+                                {force: false}) {
+    if (!force &&
+        ((expr is ast.SimpleIdentifier ||
+          expr is ast.SimpleStringLiteral))) {
+      return expr;
+    }
+    var name = newName(base);
+    currentBlock.statements.add(
+        makeVariableDeclarationStatement(name, expr));
+    return makeIdentifier(name);
+  }
+  
   visitNode(ast.AstNode node) {
     throw 'TODO(${node.runtimeType})';
   }
@@ -183,10 +202,24 @@ class TransformVisitor extends ast.GeneralizingAstVisitor {
       s([]);
     } else {
       var args = [];
+      var seenAwait = false;
       var cont = (v) { args.add(v); return s(args); };
-      for (var expr in node.arguments.skip(1).toList().reversed) {
+      for (var i = node.arguments.length - 1; i >= 1; --i) {
+        var expr = node.arguments[i];
+        seenAwait = seenAwait || awaits.contains(expr);
         var current = cont;
-        cont = (v) { args.add(v); return visit(expr)(current); };
+        if (seenAwait) {
+          cont = (v) {
+            var value = addDeclaration('v', v);
+            args.add(value);
+            return visit(expr)(current);
+          };
+        } else {
+          cont = (v) {
+            args.add(v);
+            return visit(expr)(current);
+          };
+        }
       }
       return visit(node.arguments.first)(cont);
     }
@@ -221,7 +254,10 @@ class TransformVisitor extends ast.GeneralizingAstVisitor {
   
   visitExpressionStatement(ast.ExpressionStatement node) => (r, s) {
     if (awaits.contains(node.expression)) {
-      return visit(node.expression)((_) => s());
+      return visit(node.expression)((expr) {
+          currentBlock.statements.add(AstFactory.expressionStatement(expr));
+          return s();
+      });
     } else {
       currentBlock.statements.add(node);
       return s();
@@ -230,11 +266,10 @@ class TransformVisitor extends ast.GeneralizingAstVisitor {
   
   visitVariableDeclarationStatement(ast.VariableDeclarationStatement node) => (r, s) {
     assert(node.variables.variables.length == 1);
-    assert(node.variables.variables.first.initializer != null);
-    return visit(node.variables.variables.first.initializer)((expr) {
-      currentBlock.statements.add(makeVariableDeclarationStatement(
-          node.variables.variables.first.name.name,
-          expr));
+    var variable = node.variables.variables.first;
+    assert(variable.initializer != null);
+    return visit(variable.initializer)((expr) {
+      addDeclaration(variable.name.name, expr, force: true);
       return s();
     });
   };
@@ -252,27 +287,17 @@ class TransformVisitor extends ast.GeneralizingAstVisitor {
     if (node.target != null) {
       return visit(node.target)((rator) {
         return visit(node.argumentList)((rands) {
-          String name = newName('x');
-          ast.VariableDeclarationStatement decl =
-              makeVariableDeclarationStatement(name,
-                  AstFactory.methodInvocation(
-                    rator,
-                    node.methodName.name,
-                    rands));
-          currentBlock.statements.add(decl);
-          return s(makeIdentifier(name));
+          return s(AstFactory.methodInvocation(
+              rator,
+              node.methodName.name,
+              rands));
         });
       });
     } else {
       return visit(node.argumentList)((rands) {
-        String name = newName('x');
-        ast.VariableDeclarationStatement decl =
-            makeVariableDeclarationStatement(name,
-                AstFactory.methodInvocation2(
-                    node.methodName.name,
-                    rands));
-        currentBlock.statements.add(decl);
-        return s(makeIdentifier(name));
+        return s(AstFactory.methodInvocation2(
+            node.methodName.name,
+            rands));
       });
     }
   };
