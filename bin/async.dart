@@ -21,7 +21,6 @@ main(List<String> args) {
   print(transform.visit(unit));
   
   for (var error in errorListener.errors) {
-    print(error);
   }  
 }
 

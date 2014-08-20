@@ -171,9 +171,8 @@ class TransformVisitor extends ast.GeneralizingAstVisitor {
                 AstFactory.typeName4('Completer', []),
                 [])),
          AstFactory.expressionStatement(
-             AstFactory.instanceCreationExpression2(
-                 scanner.Keyword.NEW,
-                 AstFactory.typeName4('Future', []),
+             AstFactory.methodInvocation2(
+                 'scheduleMicrotask',
                  [AstFactory.functionExpression2(AstFactory.formalParameterList([]),
                       AstFactory.blockFunctionBody(currentBlock))])),
          AstFactory.returnStatement2(AstFactory.propertyAccess2(makeIdentifier(result), 'future'))]);

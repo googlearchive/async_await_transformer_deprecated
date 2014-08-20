@@ -5,8 +5,8 @@ main() async {
 }
 
 f() async {
-   print(“A”);
-   var b = await g(“B”);
+   print('A');
+   var b = await g('B');
    print(b);
 }
 
