@@ -1,5 +1,4 @@
-name: sample_pubspec
-description: A sample application
+name: async
+description: A sample command-line application
 dependencies:
   analyzer: any
-  pretty: any
