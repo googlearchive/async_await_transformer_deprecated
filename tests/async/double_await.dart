@@ -5,6 +5,5 @@ main() async {
 }
 
 f() async {
-  print(“A”);
+  print('A');
 }
-  
