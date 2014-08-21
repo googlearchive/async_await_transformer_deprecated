@@ -19,9 +19,10 @@ main(List<String> args) {
   analysis.visit(unit);
   var transform = new TransformVisitor(analysis.awaits);
   print(transform.visit(unit));
-  
+
   for (var error in errorListener.errors) {
-  }  
+    print(error);
+  }
 }
 
 _parse(File file, AnalysisErrorListener errorListener) {
