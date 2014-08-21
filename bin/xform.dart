@@ -91,22 +91,12 @@ class AnalysisVisitor extends ast.GeneralizingAstVisitor {
     return maybeAdd(node, visit(node.variables));
   }
 
+  visitWhileStatement(ast.WhileStatement node) {
+    var result = visit(node.condition);
+    return maybeAdd(node, visit(node.body) || result);
+  }
+
   // Expressions
-  visitSimpleStringLiteral(ast.SimpleStringLiteral node) {
-    return false;
-  }
-
-  visitSimpleIdentifier(ast.SimpleIdentifier node) {
-    return false;
-  }
-
-  visitMethodInvocation(ast.MethodInvocation node) {
-    var result = node.target != null && visit(node.target);
-    result = visit(node.argumentList) || result;
-    if (result) awaits.add(node);
-    return result;
-  }
-
   visitAwaitExpression(ast.AwaitExpression node) {
     visit(node.expression);
     awaits.add(node);
@@ -115,6 +105,24 @@ class AnalysisVisitor extends ast.GeneralizingAstVisitor {
 
   visitFunctionExpression(ast.FunctionExpression node) {
     visit(node.body);
+    return false;
+  }
+
+  visitMethodInvocation(ast.MethodInvocation node) {
+    var result = node.target != null && visit(node.target);
+    result = visit(node.argumentList) || result;
+    return maybeAdd(node, result);
+  }
+
+  visitParenthesizedExpression(ast.ParenthesizedExpression node) {
+    return maybeAdd(node, visit(node.expression));
+  }
+
+  visitSimpleStringLiteral(ast.SimpleStringLiteral node) {
+    return false;
+  }
+
+  visitSimpleIdentifier(ast.SimpleIdentifier node) {
     return false;
   }
 }
@@ -562,34 +570,51 @@ class TransformVisitor extends ast.GeneralizingAstVisitor {
     });
   };
 
-  // Expressions
-  visitSimpleStringLiteral(ast.SimpleStringLiteral node) => (f, s) {
-    return s(node);
-  };
-
-  visitSimpleIdentifier(ast.SimpleIdentifier node) => (f, s) {
-    return s(node);
-  };
-
-  visitMethodInvocation(ast.MethodInvocation node) => (f, s) {
-    if (node.target != null) {
-      return visit(node.target)(f, (rator) {
-        return visit(node.argumentList)(f, (rands) {
-          return s(AstFactory.methodInvocation(
-              rator,
-              node.methodName.name,
-              rands));
-        });
-      });
-    } else {
-      return visit(node.argumentList)(f, (rands) {
-        return s(AstFactory.methodInvocation2(
-            node.methodName.name,
-            rands));
-      });
+  visitWhileStatement(ast.WhileStatement node) => (f, r, s) {
+    if (!awaits.contains(node)) {
+      currentBlock.statements.add(node);
+      return s();
     }
+
+    var loopName = newName('loop');
+    var savedBlock = currentBlock;
+    var loopBlock = currentBlock = AstFactory.block([]);
+    visit(node.condition)(f, (expr) {
+      var savedBlock = currentBlock;
+      var thenBlock = currentBlock = AstFactory.block([]);
+      visit(node.body)(f, r, () {
+        currentBlock.statements.add(
+            AstFactory.expressionStatement(
+                AstFactory.methodInvocation(
+                    AstFactory.methodInvocation(
+                        AstFactory.identifier3('Future'),
+                        'wait',
+                        [AstFactory.listLiteral([])]),
+                    'then',
+                    [AstFactory.functionExpression2(
+                        AstFactory.formalParameterList(
+                            [AstFactory.simpleFormalParameter3('_')]),
+                        AstFactory.expressionFunctionBody(
+                          AstFactory.methodInvocation2(loopName, []))
+                          ..semicolon = null)])));
+      });
+      var elseBlock = currentBlock = AstFactory.block([]);
+      s();
+      currentBlock = savedBlock;
+      currentBlock.statements.add(
+          AstFactory.ifStatement2(expr, thenBlock, elseBlock));
+    });
+    currentBlock = savedBlock;
+    currentBlock.statements.add(
+        AstFactory.functionDeclarationStatement(null, null, loopName,
+            AstFactory.functionExpression2(AstFactory.formalParameterList([]),
+                AstFactory.blockFunctionBody(loopBlock))));
+    currentBlock.statements.add(
+        AstFactory.expressionStatement(
+            AstFactory.methodInvocation2(loopName, [])));
   };
 
+  // Expressions
   visitAwaitExpression(ast.AwaitExpression node) => (f, s) {
     if (awaits.contains(node.expression)) {
       return visit(node.expression)(f, (expr) {
@@ -615,6 +640,37 @@ class TransformVisitor extends ast.GeneralizingAstVisitor {
   };
 
   visitFunctionExpression(ast.FunctionExpression node) => (f, s) {
+    return s(node);
+  };
+
+  visitMethodInvocation(ast.MethodInvocation node) => (f, s) {
+    if (node.target != null) {
+      return visit(node.target)(f, (rator) {
+        return visit(node.argumentList)(f, (rands) {
+          return s(AstFactory.methodInvocation(
+              rator,
+              node.methodName.name,
+              rands));
+        });
+      });
+    } else {
+      return visit(node.argumentList)(f, (rands) {
+        return s(AstFactory.methodInvocation2(
+            node.methodName.name,
+            rands));
+      });
+    }
+  };
+
+  visitParenthesizedExpression(ast.ParenthesizedExpression node) => (f, s) {
+    return visit(node.expression)(f, s);
+  };
+
+  visitSimpleStringLiteral(ast.SimpleStringLiteral node) => (f, s) {
+    return s(node);
+  };
+
+  visitSimpleIdentifier(ast.SimpleIdentifier node) => (f, s) {
     return s(node);
   };
 }
