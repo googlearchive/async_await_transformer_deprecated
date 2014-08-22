@@ -1,9 +1,8 @@
 import 'package:analyzer/src/generated/ast.dart' as ast;
 import 'package:analyzer/src/generated/scanner.dart' as scanner;
 import 'package:analyzer/src/generated/testing/ast_factory.dart';
-// import 'package:analyzer/src/generated/testing/token_factory.dart';
 
-class AnalysisVisitor extends ast.GeneralizingAstVisitor {
+class AnalysisVisitor extends ast.GeneralizingAstVisitor<bool> {
   Set<ast.AstNode> awaits = new Set<ast.AstNode>();
 
   bool maybeAdd(ast.AstNode node, bool shouldAdd) {
@@ -11,62 +10,69 @@ class AnalysisVisitor extends ast.GeneralizingAstVisitor {
     return shouldAdd;
   }
 
-  visit(ast.AstNode node) => node.accept(this);
+  bool visit(ast.AstNode node) => node.accept(this);
 
-  visitNode(ast.AstNode node) {
+  bool visitNode(ast.AstNode node) {
     throw 'TODO(${node.runtimeType})';
   }
 
-  visitCompilationUnit(ast.CompilationUnit node) {
+  bool visitCompilationUnit(ast.CompilationUnit node) {
     node.declarations.forEach(visit);
+    return false;
   }
 
-  visitFunctionDeclaration(ast.FunctionDeclaration node) {
-    visit(node.functionExpression.body);
+  bool visitFunctionDeclaration(ast.FunctionDeclaration node) {
+    return visit(node.functionExpression.body);
   }
 
-  visitBlockFunctionBody(ast.BlockFunctionBody node) {
-    if (node.keyword == null) return;
+  bool visitBlockFunctionBody(ast.BlockFunctionBody node) {
+    if (node.keyword == null) return false;
     if (node.star != null) {
       throw 'TODO(${node.keyword}${node.star})';
     }
-    visit(node.block);
+    return visit(node.block);
   }
 
-  visitArgumentList(ast.ArgumentList node) {
+  bool visitArgumentList(ast.ArgumentList node) {
     var result = false;
-    node.arguments.forEach((e) { result = visit(e) || result; });
+    node.arguments.forEach((e) {
+      result = visit(e) || result;
+    });
     return maybeAdd(node, result);
   }
 
-  visitCatchClause(ast.CatchClause node) {
+  bool visitCatchClause(ast.CatchClause node) {
     assert(node.onKeyword == null);
     assert(node.stackTraceParameter == null);
     return maybeAdd(node, visit(node.body));
   }
 
-  visitVariableDeclarationList(ast.VariableDeclarationList node) {
+  bool visitVariableDeclarationList(ast.VariableDeclarationList node) {
     var result = false;
-    node.variables.forEach((d) { result = visit(d) || result; });
+    node.variables.forEach((d) {
+      result = visit(d) || result;
+    });
     return maybeAdd(node, result);
   }
 
-  visitVariableDeclaration(ast.VariableDeclaration node) {
+  bool visitVariableDeclaration(ast.VariableDeclaration node) {
     return maybeAdd(node, visit(node.initializer));
   }
 
   // Statements
-  visitBlock(ast.Block node) {
+  bool visitBlock(ast.Block node) {
     var result = false;
-    node.statements.forEach((s) { result = visit(s) || result; });
+    node.statements.forEach((s) {
+      result = visit(s) || result;
+    });
     return maybeAdd(node, result);
   }
 
-  visitExpressionStatement(ast.ExpressionStatement node) {
+  bool visitExpressionStatement(ast.ExpressionStatement node) {
     return maybeAdd(node, visit(node.expression));
   }
 
-  visitIfStatement(ast.IfStatement node) {
+  bool visitIfStatement(ast.IfStatement node) {
     var result = visit(node.condition);
     result = visit(node.thenStatement) || result;
     if (node.elseStatement != null) {
@@ -75,7 +81,7 @@ class AnalysisVisitor extends ast.GeneralizingAstVisitor {
     return maybeAdd(node, result);
   }
 
-  visitTryStatement(ast.TryStatement node) {
+  bool visitTryStatement(ast.TryStatement node) {
     var result = visit(node.body);
     if (node.catchClauses.isNotEmpty) {
       assert(node.catchClauses.length == 1);
@@ -87,54 +93,100 @@ class AnalysisVisitor extends ast.GeneralizingAstVisitor {
     return maybeAdd(node, result);
   }
 
-  visitVariableDeclarationStatement(ast.VariableDeclarationStatement node) {
+  bool visitVariableDeclarationStatement(
+        ast.VariableDeclarationStatement node) {
     return maybeAdd(node, visit(node.variables));
   }
 
-  visitWhileStatement(ast.WhileStatement node) {
+  bool visitWhileStatement(ast.WhileStatement node) {
     var result = visit(node.condition);
     return maybeAdd(node, visit(node.body) || result);
   }
 
   // Expressions
-  visitAwaitExpression(ast.AwaitExpression node) {
+  bool visitAwaitExpression(ast.AwaitExpression node) {
     visit(node.expression);
     awaits.add(node);
     return true;
   }
 
-  visitFunctionExpression(ast.FunctionExpression node) {
+  bool visitFunctionExpression(ast.FunctionExpression node) {
     visit(node.body);
     return false;
   }
 
-  visitMethodInvocation(ast.MethodInvocation node) {
+  bool visitMethodInvocation(ast.MethodInvocation node) {
     var result = node.target != null && visit(node.target);
     result = visit(node.argumentList) || result;
     return maybeAdd(node, result);
   }
 
-  visitParenthesizedExpression(ast.ParenthesizedExpression node) {
+  bool visitParenthesizedExpression(ast.ParenthesizedExpression node) {
     return maybeAdd(node, visit(node.expression));
   }
 
-  visitSimpleStringLiteral(ast.SimpleStringLiteral node) {
+  bool visitSimpleStringLiteral(ast.SimpleStringLiteral node) {
     return false;
   }
 
-  visitSimpleIdentifier(ast.SimpleIdentifier node) {
+  bool visitSimpleIdentifier(ast.SimpleIdentifier node) {
     return false;
   }
 }
 
-class TransformVisitor extends ast.GeneralizingAstVisitor {
+// AST construction functions.
+ast.SimpleIdentifier identifier(String name) {
+  return AstFactory.identifier3(name);
+}
+
+ast.FunctionExpression functionExpression(List<String> parameters,
+    ast.AstNode body) {
+  var formalParameters =
+      AstFactory.formalParameterList(
+          parameters.map(AstFactory.simpleFormalParameter3).toList());
+  var functionBody;
+  if (body is ast.Block) {
+    functionBody = AstFactory.blockFunctionBody(body);
+  } else if (body is ast.Statement) {
+    functionBody = AstFactory.blockFunctionBody(AstFactory.block([body]));
+  } else {
+    assert(body is ast.Expression);
+    functionBody = AstFactory.expressionFunctionBody(body);
+    functionBody.semicolon = null;
+  }
+  return AstFactory.functionExpression2(formalParameters, functionBody);
+}
+
+ast.VariableDeclarationStatement variableDeclaration(
+    String name, ast.Expression initializer) {
+  return AstFactory.variableDeclarationStatement2(
+          scanner.Keyword.VAR,
+          [AstFactory.variableDeclaration2(name, initializer)]);
+}
+
+ast.Block emptyBlock() {
+  return AstFactory.block([]);
+}
+
+typedef void StatementCont();
+typedef void ReturnCont(ast.Expression expr);
+
+typedef void StatementTransformer(ErrorCont f, ReturnCont r, StatementCont s);
+
+class AsyncTransformer extends ast.RecursiveAstVisitor<StatementTransformer> {
   final Set<ast.AstNode> awaits;
+  AsyncExpressionTransformer expressionTransformer;
 
   ast.Block currentBlock;
 
-  TransformVisitor(this.awaits);
+  AsyncTransformer(this.awaits) {
+    expressionTransformer = new AsyncExpressionTransformer(this);
+  }
 
   visit(ast.AstNode node) => node.accept(this);
+  ExpressionTransformer visitExpression(ast.Expression expr) {
+    return expressionTransformer.visit(expr);
+  }
 
   int counter = 0;
 
@@ -146,75 +198,45 @@ class TransformVisitor extends ast.GeneralizingAstVisitor {
   ///
   /// No declaration is added if the expression is already a value and [force]
   /// is false.
-  ast.Expression addDeclaration(String base,
-                                ast.Expression expr,
-                                {force: false}) {
+  ast.Expression addDeclaration(String base, ast.Expression expr, {force:
+      false}) {
     if (!force &&
-        ((expr is ast.SimpleIdentifier ||
-          expr is ast.SimpleStringLiteral))) {
+        ((expr is ast.SimpleIdentifier || expr is ast.SimpleStringLiteral))) {
       return expr;
     }
     var name = newName(base);
-    currentBlock.statements.add(
-        makeVariableDeclarationStatement(name, expr));
-    return makeIdentifier(name);
+    addStatement(variableDeclaration(name, expr));
+    return identifier(name);
+  }
+
+  void addStatement(ast.AstNode node) {
+    if (node is ast.Statement) {
+      currentBlock.statements.add(node);
+    } else {
+      assert(node is ast.Expression);
+      currentBlock.statements.add(AstFactory.expressionStatement(node));
+    }
   }
 
   visitNode(ast.AstNode node) {
-    throw 'TODO(${node.runtimeType})';
+    throw 'AsyncTransformer(${node.runtimeType})';
   }
 
-  static ast.SimpleIdentifier makeIdentifier(String name) {
-    return AstFactory.identifier3(name);
-  }
-
-  static ast.VariableDeclarationStatement makeVariableDeclarationStatement(
-      String name, ast.Expression initializer) {
-    return AstFactory.variableDeclarationStatement2(
-        scanner.Keyword.VAR,
-        [AstFactory.variableDeclaration2(name, initializer)]);
-  }
-
-  reifyExpressionCont(s, f) {
+  ast.FunctionExpression reifyErrorCont(ErrorCont f) {
     var savedBlock = currentBlock;
-    var exnBlock = currentBlock = AstFactory.block([]);
-    String exnName = newName('e');
-    f(makeIdentifier(exnName));
-
-    currentBlock = AstFactory.block([]);
-    String name = newName('x');
-    s(makeIdentifier(name));
-
-    var fun = AstFactory.functionExpression2(
-        AstFactory.formalParameterList([AstFactory.simpleFormalParameter3(name)]),
-        AstFactory.blockFunctionBody(
-            AstFactory.block(
-                [AstFactory.tryStatement2(
-                   currentBlock,
-                   [AstFactory.catchClause(exnName, exnBlock.statements)])])));
-    currentBlock = savedBlock;
-    return fun;
-  }
-
-  reifyErrorCont(f) {
-    var savedBlock = currentBlock;
-    currentBlock = AstFactory.block([]);
+    currentBlock = emptyBlock();
     String name = newName('e');
-    f(makeIdentifier(name));
-    var fun = AstFactory.functionExpression2(
-        AstFactory.formalParameterList([AstFactory.simpleFormalParameter3(name)]),
-        AstFactory.blockFunctionBody(currentBlock));
+    f(identifier(name));
+    var fun = functionExpression([name], currentBlock);
     currentBlock = savedBlock;
     return fun;
   }
 
-  reifyStatementCont(s) {
+  ast.FunctionExpression reifyStatementCont(StatementCont s) {
     var savedBlock = currentBlock;
-    currentBlock = AstFactory.block([]);
+    currentBlock = emptyBlock();
     s();
-    var fun = AstFactory.functionExpression2(
-        AstFactory.formalParameterList([]),
-        AstFactory.blockFunctionBody(currentBlock));
+    var fun = functionExpression([], currentBlock);
     currentBlock = savedBlock;
     return fun;
   }
@@ -247,75 +269,46 @@ class TransformVisitor extends ast.GeneralizingAstVisitor {
       throw 'TODO(${node.keyword}${node.star})';
     }
     counter = 0;
-    currentBlock = AstFactory.block([]);
+    currentBlock = emptyBlock();
     var result = newName('result');
-    visit(node.block)(
-        (e) { currentBlock.statements.add(
-                 AstFactory.expressionStatement(
-                     AstFactory.methodInvocation(
-                       makeIdentifier(result),
-                       'completeError',
-                       [e]))); },
-        (v) { throw 'returned'; },
-        () { currentBlock.statements.add(
-                 AstFactory.expressionStatement(
-                     AstFactory.methodInvocation(
-                         makeIdentifier(result),
-                         'complete',
-                         [AstFactory.nullLiteral()]))); });
+    visit(node.block)((e) {
+      addStatement(AstFactory.methodInvocation(identifier(result),
+                                               'completeError',
+                                               [e]));
+    }, (v) {
+      throw 'returned';
+    }, () {
+      addStatement(AstFactory.methodInvocation(
+          identifier(result),
+          'complete',
+          [AstFactory.nullLiteral()]));
+    });
 
     String exnName = newName('e');
     return AstFactory.blockFunctionBody2(
-        [makeVariableDeclarationStatement(result,
-            AstFactory.instanceCreationExpression2(
-                scanner.Keyword.NEW,
-                AstFactory.typeName4('Completer', []),
-                [])),
-         AstFactory.expressionStatement(
-             AstFactory.methodInvocation2(
-                 'scheduleMicrotask',
-                 [AstFactory.functionExpression2(AstFactory.formalParameterList([]),
-                      AstFactory.blockFunctionBody(
-                          AstFactory.block([
-                          AstFactory.tryStatement2(
-                              currentBlock,
-                              [AstFactory.catchClause(
-                                   exnName,
-                                   [AstFactory.expressionStatement(
-                                       AstFactory.methodInvocation(
-                                         makeIdentifier(result),
-                                         'completeError',
-                                         [makeIdentifier(exnName)]))])])])))])),
-         AstFactory.returnStatement2(AstFactory.propertyAccess2(makeIdentifier(result), 'future'))]);
+        [variableDeclaration(
+              result,
+              AstFactory.instanceCreationExpression2(
+                  scanner.Keyword.NEW,
+                  AstFactory.typeName4('Completer', []),
+                  [])),
+          AstFactory.expressionStatement(
+              AstFactory.methodInvocation2(
+                  'scheduleMicrotask',
+                  [functionExpression(
+                        [],
+                        AstFactory.tryStatement2(
+                            currentBlock,
+                            [AstFactory.catchClause(
+                                  exnName,
+                                  [AstFactory.expressionStatement(
+                                        AstFactory.methodInvocation(
+                                            identifier(result),
+                                            'completeError',
+                                            [identifier(exnName)]))])]))])),
+          AstFactory.returnStatement2(
+              AstFactory.propertyAccess2(identifier(result), 'future'))]);
   }
-
-  visitArgumentList(ast.ArgumentList node) => (f, s) {
-    if (node.arguments.isEmpty) {
-      s([]);
-    } else {
-      var args = [];
-      var seenAwait = false;
-      var cont = (v) { args.add(v); return s(args); };
-      for (var i = node.arguments.length - 1; i >= 1; --i) {
-        var expr = node.arguments[i];
-        seenAwait = seenAwait || awaits.contains(expr);
-        var current = cont;
-        if (seenAwait) {
-          cont = (v) {
-            var value = addDeclaration('v', v);
-            args.add(value);
-            return visit(expr)(f, current);
-          };
-        } else {
-          cont = (v) {
-            args.add(v);
-            return visit(expr)(f, current);
-          };
-        }
-      }
-      return visit(node.arguments.first)(f, cont);
-    }
-  };
 
   visitCatchClause(ast.CatchClause node) => (f, r, s) {
     return visit(node.body)(f, r, s);
@@ -340,337 +333,393 @@ class TransformVisitor extends ast.GeneralizingAstVisitor {
   }
 
   // Statements
-  visitBlock(ast.Block node) => (f, r, s) {
-    if (!awaits.contains(node)) {
-      currentBlock.statements.add(node);
-      return s();
-    }
-    for (var stmt in node.statements.reversed) {
-      var current = s;
-      s = () { return visit(stmt)(f, r, current); };
-    }
-    return s();
-  };
-
-  visitExpressionStatement(ast.ExpressionStatement node) => (f, r, s) {
-    if (!awaits.contains(node)) {
-      currentBlock.statements.add(node);
-      return s();
-    }
-    return visit(node.expression)(f, (expr) {
-        currentBlock.statements.add(AstFactory.expressionStatement(expr));
+  StatementTransformer visitBlock(ast.Block node) {
+    return (ErrorCont f, ReturnCont r, StatementCont s) {
+      if (!awaits.contains(node)) {
+        addStatement(node);
         return s();
-    });
-  };
-
-  visitIfStatement(ast.IfStatement node) => (f, r, s) {
-    if (!awaits.contains(node)) {
-      currentBlock.statements.add(node);
+      }
+      for (var stmt in node.statements.reversed) {
+        var current = s;
+        s = () {
+          return visit(stmt)(f, r, current);
+        };
+      }
       return s();
-    }
-    var hasElse = node.elseStatement != null;
-    if (awaits.contains(node.condition)) {
-      return visit(node.condition)(f, (expr) {
-        if (!awaits.contains(node.thenStatement) &&
-            (!hasElse || !awaits.contains(node.elseStatement))) {
-          currentBlock.statements.add(
-              AstFactory.ifStatement2(expr,
-                                      node.thenStatement,
-                                      node.elseStatement));
-          return s();
-        }
+    };
+  }
 
+  StatementTransformer visitExpressionStatement(ast.ExpressionStatement node) {
+    return (ErrorCont f, ReturnCont r, StatementCont s) {
+      if (!awaits.contains(node)) {
+        addStatement(node);
+        return s();
+      }
+      return visitExpression(node.expression)(f, (expr) {
+        addStatement(expr);
+        return s();
+      });
+    };
+  }
+
+  StatementTransformer visitIfStatement(ast.IfStatement node) {
+    return (ErrorCont f, ReturnCont r, StatementCont s) {
+      if (!awaits.contains(node)) {
+        addStatement(node);
+        return s();
+      }
+      var hasElse = node.elseStatement != null;
+      if (awaits.contains(node.condition)) {
+        return visitExpression(node.condition)(f, (expr) {
+          if (!awaits.contains(node.thenStatement) &&
+              (!hasElse || !awaits.contains(node.elseStatement))) {
+            addStatement(
+                AstFactory.ifStatement2(expr,
+                                        node.thenStatement,
+                                        node.elseStatement));
+            return s();
+          }
+
+          var joinName = newName('join');
+          var joinFun = reifyStatementCont(s);
+          addStatement(
+              AstFactory.functionDeclarationStatement(
+                  null, null, joinName, joinFun));
+          s = () {
+            addStatement(AstFactory.methodInvocation2(joinName, []));
+          };
+          var savedBlock = currentBlock;
+          var thenBlock = currentBlock = emptyBlock();
+          visit(node.thenStatement)(f, r, s);
+          var elseBlock = currentBlock = emptyBlock();
+          if (hasElse) {
+            visit(node.elseStatement)(f, r, s);
+          } else {
+            s();
+          }
+          currentBlock = savedBlock;
+          addStatement(AstFactory.ifStatement2(expr, thenBlock, elseBlock));
+        });
+      } else {
         var joinName = newName('join');
         var joinFun = reifyStatementCont(s);
-        currentBlock.statements.add(AstFactory.functionDeclarationStatement(
-            null, null, joinName, joinFun));
+        addStatement(
+            AstFactory.functionDeclarationStatement(
+                null, null, joinName, joinFun));
         s = () {
-          currentBlock.statements.add(
-              AstFactory.expressionStatement(
-                  AstFactory.methodInvocation2(joinName, [])));
+          addStatement(AstFactory.methodInvocation2(joinName, []));
         };
         var savedBlock = currentBlock;
-        var thenBlock = currentBlock = AstFactory.block([]);
+        var thenBlock = currentBlock = emptyBlock();
         visit(node.thenStatement)(f, r, s);
-        var elseBlock = currentBlock = AstFactory.block([]);;
+        var elseBlock = currentBlock = emptyBlock();
         if (hasElse) {
           visit(node.elseStatement)(f, r, s);
         } else {
           s();
         }
         currentBlock = savedBlock;
-        currentBlock.statements.add(
-            AstFactory.ifStatement2(expr, thenBlock, elseBlock));
-      });
-    } else {
+        addStatement(AstFactory.ifStatement2(node.condition,
+                                             thenBlock,
+                                             elseBlock));
+      }
+    };
+  }
+
+  StatementTransformer visitTryStatement(ast.TryStatement node) {
+    return (ErrorCont f, ReturnCont r, StatementCont s) {
+      if (!awaits.contains(node)) {
+        addStatement(node);
+        return s();
+      }
       var joinName = newName('join');
-      var joinFun = reifyStatementCont(s);
-      currentBlock.statements.add(AstFactory.functionDeclarationStatement(
-          null, null, joinName, joinFun));
-      s = () {
-        currentBlock.statements.add(
-            AstFactory.expressionStatement(
-                AstFactory.methodInvocation2(joinName, [])));
-      };
+      ast.FunctionExpression joinFun = reifyStatementCont(s);
+      joinFun.parameters = AstFactory.formalParameterList(
+          [AstFactory.simpleFormalParameter3('_')]);
+      addStatement(
+          AstFactory.functionDeclarationStatement(null, null, joinName, joinFun));
+
+      var finallyName = newName('finally');
+      var finallyContName = newName('cont');
+      var finallyValueName = newName('v');
       var savedBlock = currentBlock;
-      var thenBlock = currentBlock = AstFactory.block([]);
-      visit(node.thenStatement)(f, r, s);
-      var elseBlock = currentBlock = AstFactory.block([]);;
-      if (hasElse) {
-        visit(node.elseStatement)(f, r, s);
+      var finallyBlock = currentBlock = emptyBlock();
+      s = () {
+        addStatement(AstFactory.functionExpressionInvocation(
+                identifier(finallyContName),
+                [identifier(finallyValueName)]));
+      };
+      if (node.finallyBlock != null) {
+        visit(node.finallyBlock)(f, r, s);
       } else {
         s();
       }
-      currentBlock = savedBlock;
-      currentBlock.statements.add(
-          AstFactory.ifStatement2(node.condition, thenBlock, elseBlock));
-    }
-  };
 
-  visitTryStatement(ast.TryStatement node) => (f, r, s) {
-    if (!awaits.contains(node)) {
-      currentBlock.statements.add(node);
-      return s();
-    }
-    var joinName = newName('join');
-    ast.FunctionExpression joinFun = reifyStatementCont(s);
-    joinFun.parameters =
-        AstFactory.formalParameterList([AstFactory.simpleFormalParameter3('_')]);
-    currentBlock.statements.add(AstFactory.functionDeclarationStatement(
-      null, null, joinName, joinFun));// TODO: add arg to joinFun.
-
-    var finallyName = newName('finally');
-    var finallyContName = newName('cont');
-    var finallyValueName = newName('v');
-    var savedBlock = currentBlock;
-    var finallyBlock = currentBlock = AstFactory.block([]);
-    s = () {
-      currentBlock.statements.add(
-          AstFactory.expressionStatement(
-            AstFactory.functionExpressionInvocation(
-              makeIdentifier(finallyContName),
-              [makeIdentifier(finallyValueName)])));
-    };
-    if (node.finallyBlock != null) {
-      visit(node.finallyBlock)(f, r, s);
-    } else {
-      s();
-    }
-
-    var catchName = newName('catch');
-    var exnName = node.catchClauses.isEmpty
-        ? newName('e')
-        : node.catchClauses.first.exceptionParameter.name;
-    var catchBlock = currentBlock = AstFactory.block([]);
-    if (node.catchClauses.isNotEmpty) {
-      assert(node.catchClauses.length == 1);
-      visit(node.catchClauses.first)(
-          (e) {
-            currentBlock.statements.add(
-                AstFactory.expressionStatement(
-                  AstFactory.methodInvocation2(
-                      finallyName,
-                      [reifyErrorCont(f), e])));
-          },
-          (v) {
-            currentBlock.statements.add(
-                AstFactory.expressionStatement(
-                  AstFactory.methodInvocation2(
-                      finallyName,
-                      [reifyErrorCont(r), v])));
-          },
-          () {
-            currentBlock.statements.add(
-              AstFactory.expressionStatement(
-                AstFactory.methodInvocation2(
-                    finallyName,
-                    [makeIdentifier(joinName),
-                     AstFactory.nullLiteral()])));
-          });
-    } else {
-      currentBlock.statements.add(
-          AstFactory.expressionStatement(
-            AstFactory.methodInvocation2(
-                finallyName,
-                [makeIdentifier(joinName),
-                 AstFactory.nullLiteral()])));
-    }
-
-    var tryBlock = currentBlock = AstFactory.block([]);
-    visit(node.body)(
-        (e) {
-          currentBlock.statements.add(
-              AstFactory.expressionStatement(
-                AstFactory.methodInvocation2(catchName, [e])));
-        },
-        (v) {
-          currentBlock.statements.add(
-              AstFactory.expressionStatement(
-                AstFactory.methodInvocation2(
-                    finallyName,
-                    [reifyErrorCont(r), v])));
-        },
-        () {
-          AstFactory.expressionStatement(
-            AstFactory.methodInvocation2(
-                finallyName,
-                [makeIdentifier(joinName),
-                 AstFactory.nullLiteral()]));
+      var catchName = newName('catch');
+      var exnName = node.catchClauses.isEmpty ?
+          newName('e') :
+          node.catchClauses.first.exceptionParameter.name;
+      var catchBlock = currentBlock = emptyBlock();
+      if (node.catchClauses.isNotEmpty) {
+        assert(node.catchClauses.length == 1);
+        visit(node.catchClauses.first)((e) {
+          addStatement(
+              AstFactory.methodInvocation2(finallyName, [reifyErrorCont(f), e]));
+        }, (v) {
+          addStatement(
+              AstFactory.methodInvocation2(finallyName, [reifyErrorCont(r), v]));
+        }, () {
+          addStatement(
+              AstFactory.methodInvocation2(
+                  finallyName,
+                  [identifier(joinName), AstFactory.nullLiteral()]));
         });
+      } else {
+        addStatement(
+            AstFactory.methodInvocation2(
+                finallyName,
+                [identifier(joinName), AstFactory.nullLiteral()]));
+      }
 
-    currentBlock = savedBlock;
-    currentBlock.statements.add(
-        AstFactory.functionDeclarationStatement(
-            null,
-            null,
-            finallyName,
-            AstFactory.functionExpression2(
-                AstFactory.formalParameterList(
-                    [AstFactory.simpleFormalParameter3(finallyContName),
-                     AstFactory.simpleFormalParameter3(finallyValueName)]),
-                AstFactory.blockFunctionBody(finallyBlock))));
-
-    currentBlock.statements.add(
-        AstFactory.functionDeclarationStatement(
-            null,
-            null,
-            catchName,
-            AstFactory.functionExpression2(
-                AstFactory.formalParameterList(
-                    [AstFactory.simpleFormalParameter3(exnName)]),
-                AstFactory.blockFunctionBody(catchBlock))));
-     var name = newName('e');
-     currentBlock.statements.add(
-        AstFactory.tryStatement3(
-            tryBlock,
-            [AstFactory.catchClause(name,
-                 [AstFactory.expressionStatement(
-                       AstFactory.methodInvocation2(catchName,
-                                                    [makeIdentifier(name)]))])],
-            AstFactory.block([
-                AstFactory.expressionStatement(
-                    AstFactory.methodInvocation2(
-                        finallyName,
-                        [makeIdentifier(joinName),
-                         AstFactory.nullLiteral()]))])));
-  };
-
-  visitVariableDeclarationStatement(ast.VariableDeclarationStatement node) =>
-  (f, r, s) {
-    if (!awaits.contains(node)) {
-      currentBlock.statements.add(node);
-      return s();
-    }
-    assert(node.variables.variables.length == 1);
-    var variable = node.variables.variables.first;
-    assert(variable.initializer != null);
-    return visit(variable.initializer)(f, (expr) {
-      addDeclaration(variable.name.name, expr, force: true);
-      return s();
-    });
-  };
-
-  visitWhileStatement(ast.WhileStatement node) => (f, r, s) {
-    if (!awaits.contains(node)) {
-      currentBlock.statements.add(node);
-      return s();
-    }
-
-    var loopName = newName('loop');
-    var savedBlock = currentBlock;
-    var loopBlock = currentBlock = AstFactory.block([]);
-    visit(node.condition)(f, (expr) {
-      var savedBlock = currentBlock;
-      var thenBlock = currentBlock = AstFactory.block([]);
-      visit(node.body)(f, r, () {
-        currentBlock.statements.add(
-            AstFactory.expressionStatement(
-                AstFactory.methodInvocation(
-                    AstFactory.methodInvocation(
-                        AstFactory.identifier3('Future'),
-                        'wait',
-                        [AstFactory.listLiteral([])]),
-                    'then',
-                    [AstFactory.functionExpression2(
-                        AstFactory.formalParameterList(
-                            [AstFactory.simpleFormalParameter3('_')]),
-                        AstFactory.expressionFunctionBody(
-                          AstFactory.methodInvocation2(loopName, []))
-                          ..semicolon = null)])));
-      });
-      var elseBlock = currentBlock = AstFactory.block([]);
-      s();
-      currentBlock = savedBlock;
-      currentBlock.statements.add(
-          AstFactory.ifStatement2(expr, thenBlock, elseBlock));
-    });
-    currentBlock = savedBlock;
-    currentBlock.statements.add(
-        AstFactory.functionDeclarationStatement(null, null, loopName,
-            AstFactory.functionExpression2(AstFactory.formalParameterList([]),
-                AstFactory.blockFunctionBody(loopBlock))));
-    currentBlock.statements.add(
+      var tryBlock = currentBlock = emptyBlock();
+      visit(node.body)((e) {
+        addStatement(AstFactory.methodInvocation2(catchName, [e]));
+      }, (v) {
+        addStatement(
+            AstFactory.methodInvocation2(finallyName, [reifyErrorCont(r), v]));
+      }, () {
         AstFactory.expressionStatement(
-            AstFactory.methodInvocation2(loopName, [])));
-  };
-
-  // Expressions
-  visitAwaitExpression(ast.AwaitExpression node) => (f, s) {
-    if (awaits.contains(node.expression)) {
-      return visit(node.expression)(f, (expr) {
-          currentBlock.statements.add(
-              AstFactory.expressionStatement(
-                  AstFactory.methodInvocation(
-                      expr,
-                      'then',
-                      [reifyExpressionCont(s, f),
-                       AstFactory.namedExpression2('onError',
-                                                   reifyErrorCont(f))])));
+            AstFactory.methodInvocation2(
+                finallyName,
+                [identifier(joinName), AstFactory.nullLiteral()]));
       });
-    } else {
-      currentBlock.statements.add(
-          AstFactory.expressionStatement(
+
+      currentBlock = savedBlock;
+      addStatement(
+          AstFactory.functionDeclarationStatement(
+              null,
+              null,
+              finallyName,
+              functionExpression([finallyContName, finallyValueName], finallyBlock)));
+
+      addStatement(
+          AstFactory.functionDeclarationStatement(
+              null,
+              null,
+              catchName,
+              functionExpression([exnName], catchBlock)));
+      var name = newName('e');
+      addStatement(
+          AstFactory.tryStatement3(
+              tryBlock,
+              [AstFactory.catchClause(
+                    name,
+                    [AstFactory.expressionStatement(
+                          AstFactory.methodInvocation2(catchName, [identifier(name)]))])],
+              AstFactory.block(
+                  [AstFactory.expressionStatement(
+                        AstFactory.methodInvocation2(
+                            finallyName,
+                            [identifier(joinName), AstFactory.nullLiteral()]))])));
+    };
+  }
+
+  StatementTransformer visitVariableDeclarationStatement(
+      ast.VariableDeclarationStatement node) {
+    return (ErrorCont f, ReturnCont r, StatementCont s) {
+      if (!awaits.contains(node)) {
+        addStatement(node);
+        return s();
+      }
+      assert(node.variables.variables.length == 1);
+      var variable = node.variables.variables.first;
+      assert(variable.initializer != null);
+      return visitExpression(variable.initializer)(f, (expr) {
+        addDeclaration(variable.name.name, expr, force: true);
+        return s();
+      });
+    };
+  }
+
+  StatementTransformer visitWhileStatement(ast.WhileStatement node) {
+    return (ErrorCont f, ReturnCont r, StatementCont s) {
+      if (!awaits.contains(node)) {
+        addStatement(node);
+        return s();
+      }
+
+      var loopName = newName('loop');
+      var savedBlock = currentBlock;
+      var loopBlock = currentBlock = emptyBlock();
+      visitExpression(node.condition)(f, (expr) {
+        var savedBlock = currentBlock;
+        var thenBlock = currentBlock = emptyBlock();
+        visit(node.body)(f, r, () {
+          addStatement(
+              AstFactory.methodInvocation(
+                  AstFactory.methodInvocation(
+                      identifier('Future'),
+                      'wait',
+                      [AstFactory.listLiteral([])]),
+                  'then',
+                  [functionExpression(['_'], AstFactory.methodInvocation2(loopName, []))]));
+        });
+        var elseBlock = currentBlock = emptyBlock();
+        s();
+        currentBlock = savedBlock;
+        addStatement(
+            AstFactory.ifStatement2(expr, thenBlock, elseBlock));
+      });
+      currentBlock = savedBlock;
+      addStatement(
+          AstFactory.functionDeclarationStatement(
+              null,
+              null,
+              loopName,
+              functionExpression([], loopBlock)));
+      addStatement(AstFactory.methodInvocation2(loopName, []));
+    };
+  }
+}
+
+typedef void ExpressionCont(ast.Expression expr);
+typedef void ExpressionListCont(List<ast.Expression> exprs);
+typedef void ErrorCont(ast.Expression expr);
+
+typedef void ExpressionTransformer(ErrorCont f, ExpressionCont s);
+typedef void ExpressionListTransformer(ErrorCont f, ExpressionListCont s);
+
+class AsyncExpressionTransformer extends
+    ast.GeneralizingAstVisitor<ExpressionTransformer> {
+  final AsyncTransformer owner;
+
+  AsyncExpressionTransformer(this.owner);
+
+  ast.Block get currentBlock => owner.currentBlock;
+  set currentBlock(ast.Block block) {
+    owner.currentBlock = block;
+  }
+
+  Set<ast.AstNode> get awaits => owner.awaits;
+
+  visit(ast.Expression node) => node.accept(this);
+
+  ExpressionTransformer visitNode(ast.AstNode node) {
+    throw 'AsyncExpressionTransformer(${node.runtimeType})';
+  }
+
+  ast.FunctionExpression reifyExpressionCont(ExpressionCont s, ErrorCont f) {
+    var savedBlock = currentBlock;
+    var exnBlock = currentBlock = emptyBlock();
+    var exnName = owner.newName('e');
+    f(identifier(exnName));
+
+    currentBlock = emptyBlock();
+    var name = owner.newName('x');
+    s(identifier(name));
+
+    var fun =
+        functionExpression(
+            [name],
+            AstFactory.tryStatement2(
+                currentBlock,
+                [AstFactory.catchClause(exnName, exnBlock.statements)]));
+    currentBlock = savedBlock;
+    return fun;
+  }
+
+  ExpressionListTransformer translateArgumentList(ast.ArgumentList node) {
+    return (ErrorCont f, ExpressionListCont s) {
+      if (node.arguments.isEmpty) {
+        return s([]);
+      }
+      var args = [];
+      var seenAwait = false;
+      var cont = (v) {
+        args.add(v);
+        return s(args);
+      };
+      for (var i = node.arguments.length - 1; i >= 1; --i) {
+        var expr = node.arguments[i];
+        seenAwait = seenAwait || awaits.contains(expr);
+        var current = cont;
+        if (seenAwait) {
+          cont = (v) {
+            var value = owner.addDeclaration('v', v);
+            args.add(value);
+            visit(expr)(f, current);
+          };
+        } else {
+          cont = (v) {
+            args.add(v);
+            visit(expr)(f, current);
+          };
+        }
+      }
+      return visit(node.arguments.first)(f, cont);
+    };
+  }
+
+  ExpressionTransformer visitAwaitExpression(ast.AwaitExpression node) {
+    return (ErrorCont f, ExpressionCont s) {
+      if (awaits.contains(node.expression)) {
+        visit(node.expression)(f, (expr) {
+          owner.addStatement(
+              AstFactory.methodInvocation(
+                  expr,
+                  'then',
+                  [reifyExpressionCont(s, f),
+                    AstFactory.namedExpression2('onError', owner.reifyErrorCont(f))]));
+        });
+      } else {
+        owner.addStatement(
             AstFactory.methodInvocation(
                 node.expression,
                 'then',
                 [reifyExpressionCont(s, f),
-                 AstFactory.namedExpression2('onError',
-                                             reifyErrorCont(f))])));
-    }
-  };
+                  AstFactory.namedExpression2('onError', owner.reifyErrorCont(f))]));
+      }
+    };
+  }
 
-  visitFunctionExpression(ast.FunctionExpression node) => (f, s) {
-    return s(node);
-  };
+  ExpressionTransformer visitFunctionExpression(ast.FunctionExpression node) {
+    return (ErrorCont f, ExpressionCont s) {
+      s(node);
+    };
+  }
 
-  visitMethodInvocation(ast.MethodInvocation node) => (f, s) {
-    if (node.target != null) {
-      return visit(node.target)(f, (rator) {
-        return visit(node.argumentList)(f, (rands) {
-          return s(AstFactory.methodInvocation(
-              rator,
-              node.methodName.name,
-              rands));
+  ExpressionTransformer visitMethodInvocation(ast.MethodInvocation node) {
+    return (ErrorCont f, ExpressionCont s) {
+      if (node.target != null) {
+        visit(node.target)(f, (rator) {
+          translateArgumentList(node.argumentList)(f, (rands) {
+            s(AstFactory.methodInvocation(rator, node.methodName.name, rands));
+          });
         });
-      });
-    } else {
-      return visit(node.argumentList)(f, (rands) {
-        return s(AstFactory.methodInvocation2(
-            node.methodName.name,
-            rands));
-      });
-    }
-  };
+      } else {
+        translateArgumentList(node.argumentList)(f, (rands) {
+          s(AstFactory.methodInvocation2(node.methodName.name, rands));
+        });
+      }
+    };
+  }
 
-  visitParenthesizedExpression(ast.ParenthesizedExpression node) => (f, s) {
-    return visit(node.expression)(f, s);
-  };
+  ExpressionTransformer
+      visitParenthesizedExpression(ast.ParenthesizedExpression node) {
+    return (ErrorCont f, ExpressionCont s) {
+      visit(node.expression)(f, s);
+    };
+  }
 
-  visitSimpleStringLiteral(ast.SimpleStringLiteral node) => (f, s) {
-    return s(node);
-  };
+  ExpressionTransformer visitSimpleStringLiteral(ast.SimpleStringLiteral node) {
+    return (ErrorCont f, ExpressionCont s) {
+      s(node);
+    };
+  }
 
-  visitSimpleIdentifier(ast.SimpleIdentifier node) => (f, s) {
-    return s(node);
-  };
+  ExpressionTransformer visitSimpleIdentifier(ast.SimpleIdentifier node) {
+    return (ErrorCont f, ExpressionCont s) {
+      s(node);
+    };
+  }
 }
