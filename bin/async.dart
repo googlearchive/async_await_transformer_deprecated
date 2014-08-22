@@ -17,7 +17,7 @@ main(List<String> args) {
   var unit = _parse(new File(args.first), errorListener);
   var analysis = new AnalysisVisitor();
   analysis.visit(unit);
-  var transform = new TransformVisitor(analysis.awaits);
+  var transform = new AsyncTransformer(analysis.awaits);
   print(transform.visit(unit));
 
   for (var error in errorListener.errors) {
