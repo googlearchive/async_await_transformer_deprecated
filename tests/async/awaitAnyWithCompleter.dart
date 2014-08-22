@@ -1,17 +1,25 @@
-main_async() {
-
-  await(awaitany_async(constant_async(1), constant_async(2)));
-
+main() async {
+  await awaitany(constant(1), constant(2));
 }
 
-constant_async(x){ return x; } 
+constant(x) async => x;
 
-awaitany_async(a,b) {
-   var completer = new Completer()
-   try { 
-    a.then((x){ try { completer.complete(x); } catch(e) {} } 
-    b.then((x){ try { completer.complete(x); } catch(e) {} }
-   } finally { 
-      return (await(completer.future()));
-   }
+awaitany(a,b) async {
+  var completer = new Completer();
+  try {
+    a.then((x){
+      try {
+        completer.complete(x);
+      } catch (e) {
+      }
+    });
+    b.then((x){
+      try {
+        completer.complete(x);
+      } catch (e) {
+      }
+    });
+  } finally { 
+    return await completer.future();
+  }
 }
