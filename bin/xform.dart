@@ -1,7 +1,6 @@
 import 'package:analyzer/src/generated/ast.dart' as ast;
 import 'package:analyzer/src/generated/scanner.dart' as scanner;
 import 'package:analyzer/src/generated/testing/ast_factory.dart';
-import 'package:analyzer/src/generated/testing/token_factory.dart';
 
 class AnalysisVisitor extends ast.GeneralizingAstVisitor<bool> {
   Set<ast.AstNode> awaits = new Set<ast.AstNode>();
@@ -267,10 +266,9 @@ class AsyncTransformer extends ast.RecursiveAstVisitor<StatementTransformer> {
   ///
   /// No declaration is added if the expression is already a value and [force]
   /// is false.
-  ast.Expression addDeclaration(String base, ast.Expression expr, {force:
-      false}) {
-    if (!force &&
-        ((expr is ast.SimpleIdentifier || expr is ast.SimpleStringLiteral))) {
+  ast.Expression addDeclaration(String base, ast.Expression expr,
+      {force: false}) {
+    if (!force && expr is ast.Literal) {
       return expr;
     }
     var name = newName(base);
