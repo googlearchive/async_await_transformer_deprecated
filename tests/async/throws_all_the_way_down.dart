@@ -3,23 +3,23 @@ import 'dart:async';
 main() async {
   var a = f();
   try {
-     await a;
-  } catch(e) {
-     print(s);
+    await a;
+  } catch (e) {
+    print(s);
   }
 }
 
 f() async {
   try {
-    await g(“A”);
+    await g('A');
   } catch(e) {
-    await g(“B”);
+    await g('B');
   } finally {
-    await g(“C”);
+    await g('C');
   }
 }
 
 g(n) async { 
-   print(n); 
-   throw n;
+  print(n); 
+  throw n;
 }
