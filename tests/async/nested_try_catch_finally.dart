@@ -1,6 +1,6 @@
 import 'dart:async';
 
-main async {
+main() async {
   await f();
 }
 
