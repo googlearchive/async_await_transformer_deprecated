@@ -657,7 +657,6 @@ class AsyncTransformer extends ast.RecursiveAstVisitor<StatementTransformer> {
 
   StatementTransformer visitVariableDeclarationStatement(
       ast.VariableDeclarationStatement node) {
-    assert(!awaits.contains(node));
     return (ErrorCont f, ReturnCont r, StatementCont s) {
       var keyword = scanner.Keyword.keywords[node.variables.keyword.lexeme];
       return translateDeclarationList(keyword, node.variables)(f, (decls) {
