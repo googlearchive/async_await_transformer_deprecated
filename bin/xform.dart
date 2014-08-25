@@ -430,12 +430,6 @@ class AsyncTransformer extends ast.RecursiveAstVisitor<StatementTransformer> {
         }
       }
 
-      if (node.variables.length == 1) {
-        return translateDecl(node.variables.first, (decl) {
-          return s([decl]);
-        });
-      }
-
       var decls = [];
       // The continuation for the last declaration.
       var cont = (decl) {
