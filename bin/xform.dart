@@ -25,6 +25,10 @@ class AnalysisVisitor extends ast.GeneralizingAstVisitor<bool> {
     return visit(node.functionExpression.body);
   }
 
+  bool visitTopLevelVariableDeclaration(ast.TopLevelVariableDeclaration node) {
+    return false;
+  }
+
   bool visitBlockFunctionBody(ast.BlockFunctionBody node) {
     if (node.keyword == null) return false;
     if (node.star != null) {
@@ -139,6 +143,14 @@ class AnalysisVisitor extends ast.GeneralizingAstVisitor<bool> {
     return maybeAdd(node, visit(node.rightOperand) || result);
   }
 
+  bool visitBooleanLiteral(ast.BooleanLiteral node) {
+    return false;
+  }
+
+  bool visitDoubleLiteral(ast.DoubleLiteral node) {
+    return false;
+  }
+
   bool visitFunctionExpression(ast.FunctionExpression node) {
     visit(node.body);
     return false;
@@ -158,6 +170,10 @@ class AnalysisVisitor extends ast.GeneralizingAstVisitor<bool> {
     return maybeAdd(node, result);
   }
 
+  bool visitNamedExpression(ast.NamedExpression node) {
+    return maybeAdd(node, visit(node.expression));
+  }
+
   bool visitNullLiteral(ast.NullLiteral node) {
     return false;
   }
@@ -175,6 +191,10 @@ class AnalysisVisitor extends ast.GeneralizingAstVisitor<bool> {
   }
 
   bool visitSimpleIdentifier(ast.SimpleIdentifier node) {
+    return false;
+  }
+
+  bool visitSymbolLiteral(ast.SymbolLiteral node) {
     return false;
   }
 
@@ -387,6 +407,10 @@ class AsyncTransformer extends ast.RecursiveAstVisitor<StatementTransformer> {
                                             [identifier(exnName)]))])]))])),
           AstFactory.returnStatement2(
               AstFactory.propertyAccess2(identifier(result), 'future'))]);
+  }
+
+  visitTopLevelVariableDeclaration(ast.TopLevelVariableDeclaration node) {
+    return node;
   }
 
   visitExpressionFunctionBody(ast.ExpressionFunctionBody node) {
@@ -609,10 +633,11 @@ class AsyncTransformer extends ast.RecursiveAstVisitor<StatementTransformer> {
         addStatement(
             AstFactory.methodInvocation2(finallyName, [reifyErrorCont(r), v]));
       }, () {
-        AstFactory.expressionStatement(
-            AstFactory.methodInvocation2(
-                finallyName,
-                [identifier(joinName), AstFactory.nullLiteral()]));
+        addStatement(
+            AstFactory.expressionStatement(
+                AstFactory.methodInvocation2(
+                    finallyName,
+                    [identifier(joinName), AstFactory.nullLiteral()])));
       });
 
       currentBlock = savedBlock;
@@ -633,17 +658,13 @@ class AsyncTransformer extends ast.RecursiveAstVisitor<StatementTransformer> {
               functionExpression([exnName], catchBlock)));
       var name = newName('e');
       addStatement(
-          AstFactory.tryStatement3(
+          AstFactory.tryStatement2(
               tryBlock,
               [AstFactory.catchClause(
                     name,
                     [AstFactory.expressionStatement(
-                          AstFactory.methodInvocation2(catchName, [identifier(name)]))])],
-              AstFactory.block(
-                  [AstFactory.expressionStatement(
-                        AstFactory.methodInvocation2(
-                            finallyName,
-                            [identifier(joinName), AstFactory.nullLiteral()]))])));
+                          AstFactory.methodInvocation2(
+                              catchName, [identifier(name)]))])]));
     };
   }
 
@@ -835,6 +856,18 @@ class AsyncExpressionTransformer extends
     };
   }
 
+  ExpressionTransformer visitBooleanLiteral(ast.BooleanLiteral node) {
+    return (ErrorCont f, ExpressionCont s) {
+      s(node);
+    };
+  }
+
+  ExpressionTransformer visitDoubleLiteral(ast.DoubleLiteral node) {
+    return (ErrorCont f, ExpressionCont s) {
+      s(node);
+    };
+  }
+
   ExpressionTransformer visitFunctionExpression(ast.FunctionExpression node) {
     return (ErrorCont f, ExpressionCont s) {
       s(node);
@@ -875,6 +908,14 @@ class AsyncExpressionTransformer extends
     };
   }
 
+  ExpressionTransformer visitNamedExpression(ast.NamedExpression node) {
+    return (ErrorCont f, ExpressionCont s) {
+      return visit(node.expression)(f, (expr) {
+        return s(AstFactory.namedExpression(node.name, expr));
+      });
+    };
+  }
+
   ExpressionTransformer visitNullLiteral(ast.NullLiteral node) {
     return (ErrorCont f, ExpressionCont s) {
       s(node);
@@ -901,6 +942,12 @@ class AsyncExpressionTransformer extends
   }
 
   ExpressionTransformer visitSimpleIdentifier(ast.SimpleIdentifier node) {
+    return (ErrorCont f, ExpressionCont s) {
+      s(node);
+    };
+  }
+
+  ExpressionTransformer visitSymbolLiteral(ast.SymbolLiteral node) {
     return (ErrorCont f, ExpressionCont s) {
       s(node);
     };
