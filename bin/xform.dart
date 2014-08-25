@@ -409,37 +409,53 @@ class AsyncTransformer extends ast.RecursiveAstVisitor<StatementTransformer> {
         node.variables.map(visit).toList(growable: false));
   }
 
+  void residualizeDeclarationList(scanner.Keyword keyword,
+                                  List<ast.VariableDeclaration> decls) {
+    if (decls.isEmpty) return;
+    addStatement(AstFactory.variableDeclarationStatement2(keyword, decls));
+  }
+
   DeclarationListTransformer translateDeclarationList(
+      scanner.Keyword keyword,
       ast.VariableDeclarationList node) {
     assert(node.variables.isNotEmpty);
     return (ErrorCont f, DeclarationListCont s) {
+      translateDecl(ast.VariableDeclaration decl, cont) {
+        if (decl.initializer == null) {
+          return cont(decl);
+        } else {
+          return visitExpression(decl.initializer)(f, (expr) {
+            return cont(AstFactory.variableDeclaration2(decl.name.name, expr));
+          });
+        }
+      }
+
+      if (node.variables.length == 1) {
+        translateDecl(node.variables.first, (decl) {
+          return s([decl]);
+        });
+      }
+
       var decls = [];
-      var cont = (d) {
-        decls.add(d);
+      // The continuation for the last declaration.
+      var cont = (decl) {
+        decls.add(decl);
         return s(decls);
       };
       for (var i = node.variables.length - 1; i >= 1; --i) {
-        var decl = node.variables[i];
-        var current = cont;
-        cont = (d) {
-          decls.add(d);
-          if (decl.initializer == null) {
-            return current(decl);
-          } else {
-            return visitExpression(decl.initializer)(f, (expr) {
-              current(AstFactory.variableDeclaration2(decl.name.name, expr));
-            });
+        var nextCont = cont;
+        // The continuation for the i-1 declaration.
+        cont = (decl) {
+          decls.add(decl);
+          var nextDecl = node.variables[i];
+          if (awaits.contains(nextDecl)) {
+            residualizeDeclarationList(keyword, decls);
+            decls.clear();
           }
+          translateDecl(nextDecl, nextCont);
         };
       }
-      var decl = node.variables.first;
-      if (decl.initializer == null) {
-        return cont(decl);
-      } else {
-        return visitExpression(decl.initializer)(f, (expr) {
-          cont(AstFactory.variableDeclaration2(decl.name.name, expr));
-        });
-      }
+      translateDecl(node.variables.first, cont);
     };
   }
 
@@ -639,13 +655,10 @@ class AsyncTransformer extends ast.RecursiveAstVisitor<StatementTransformer> {
 
   StatementTransformer visitVariableDeclarationStatement(
       ast.VariableDeclarationStatement node) {
-    assert(!awaits.contains(node));
     return (ErrorCont f, ReturnCont r, StatementCont s) {
-      return translateDeclarationList(node.variables)(f, (decls) {
-        addStatement(
-            AstFactory.variableDeclarationStatement2(
-                scanner.Keyword.keywords[node.variables.keyword.lexeme],
-                decls));
+      var keyword = scanner.Keyword.keywords[node.variables.keyword.lexeme];
+      return translateDeclarationList(keyword, node.variables)(f, (decls) {
+        residualizeDeclarationList(keyword, decls);
         return s();
       });
     };
