@@ -15,7 +15,7 @@ main(List<String> args) {
     exit(0);
   }
 
-  var errorListener = new _ErrorCollector();
+  var errorListener = new ErrorCollector();
   var unit = _parse(new File(args.first), errorListener);
   var analysis = new AnalysisVisitor();
   analysis.visit(unit);
