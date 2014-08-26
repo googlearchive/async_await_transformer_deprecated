@@ -10,11 +10,11 @@ main() async {
 
 }
 
-constant (x) async {
+constant(x) async {
  return x; 
 }
 
-awaitall (tasks) async {
+awaitall(tasks) async {
    for(var task in tasks) { 
       await(task); 
    }
