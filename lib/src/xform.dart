@@ -29,6 +29,10 @@ class AnalysisVisitor extends ast.GeneralizingAstVisitor<bool> {
     return false;
   }
 
+  bool visitConstructorDeclaration(ast.ConstructorDeclaration node) {
+    return false;
+  }
+
   bool visitFieldDeclaration(ast.FieldDeclaration node) {
     return false;
   }
@@ -58,6 +62,14 @@ class AnalysisVisitor extends ast.GeneralizingAstVisitor<bool> {
   bool visitExpressionFunctionBody(ast.ExpressionFunctionBody node) {
     if (node.keyword == null) return false;
     return visit(node.expression);
+  }
+
+  bool visitEmptyFunctionBody(ast.EmptyFunctionBody node) {
+    return false;
+  }
+
+  bool visitFunctionTypeAlias(ast.FunctionTypeAlias node) {
+    return false;
   }
 
   bool visitArgumentList(ast.ArgumentList node) {
@@ -461,12 +473,20 @@ class AsyncTransformer extends ast.RecursiveAstVisitor<StatementTransformer> {
         node.rightBracket);
   }
 
+  visitConstructorDeclaration(ast.ConstructorDeclaration node) {
+    return node;
+  }
+
   visitFieldDeclaration(ast.FieldDeclaration node) {
     return node;
   }
 
   visitMethodDeclaration(ast.MethodDeclaration node) {
     node.body = visit(node.body);
+    return node;
+  }
+
+  visitTopLevelVariableDeclaration(ast.TopLevelVariableDeclaration node) {
     return node;
   }
 
@@ -527,15 +547,19 @@ class AsyncTransformer extends ast.RecursiveAstVisitor<StatementTransformer> {
               AstFactory.propertyAccess2(identifier(result), 'future'))]);
   }
 
-  visitTopLevelVariableDeclaration(ast.TopLevelVariableDeclaration node) {
-    return node;
-  }
-
   visitExpressionFunctionBody(ast.ExpressionFunctionBody node) {
     if (node.keyword == null) return node;
     return visit(AstFactory.blockFunctionBody2(
         [AstFactory.returnStatement2(node.expression)])
         ..keyword = node.keyword);
+  }
+
+  visitEmptyFunctionBody(ast.EmptyFunctionBody node) {
+    return node;
+  }
+
+  visitFunctionTypeAlias(ast.FunctionTypeAlias node) {
+    return node;
   }
 
   visitCatchClause(ast.CatchClause node) => (f, r, s) {
