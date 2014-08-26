@@ -99,6 +99,10 @@ class AnalysisVisitor extends ast.GeneralizingAstVisitor<bool> {
   }
 
   // Statements
+  bool visitAssertStatement(ast.AssertStatement node) {
+    return maybeAdd(node, visit(node.condition));
+  }
+
   bool visitBlock(ast.Block node) {
     var result = false;
     node.statements.forEach((s) {
@@ -118,6 +122,10 @@ class AnalysisVisitor extends ast.GeneralizingAstVisitor<bool> {
   bool visitDoStatement(ast.DoStatement node) {
     var result = visit(node.body);
     return maybeAdd(node, visit(node.condition) || result);
+  }
+
+  bool visitEmptyStatement(ast.EmptyStatement node) {
+    return false;
   }
 
   bool visitExpressionStatement(ast.ExpressionStatement node) {
@@ -185,6 +193,10 @@ class AnalysisVisitor extends ast.GeneralizingAstVisitor<bool> {
   }
 
   // Expressions
+  bool visitAsExpression(ast.AsExpression node) {
+    return maybeAdd(node, visit(node.expression));
+  }
+
   bool visitAssignmentExpression(ast.AssignmentExpression node) {
     var result = visit(node.leftHandSide);
     return maybeAdd(node, visit(node.rightHandSide) || result);
@@ -225,6 +237,10 @@ class AnalysisVisitor extends ast.GeneralizingAstVisitor<bool> {
 
   bool visitIntegerLiteral(ast.IntegerLiteral node) {
     return false;
+  }
+
+  bool visitIsExpression(ast.IsExpression node) {
+    return maybeAdd(node, visit(node.expression));
   }
 
   bool visitListLiteral(ast.ListLiteral node) {
@@ -268,6 +284,10 @@ class AnalysisVisitor extends ast.GeneralizingAstVisitor<bool> {
 
   bool visitPrefixedIdentifier(ast.PrefixedIdentifier node) {
     return false;
+  }
+
+  bool visitPrefixExpression(ast.PrefixExpression node) {
+    return maybeAdd(node, visit(node.operand));
   }
 
   bool visitPropertyAccess(ast.PropertyAccess node) {
@@ -572,7 +592,13 @@ class AsyncTransformer extends ast.AstVisitor {
 
   // ---- Statements ----
   unimplemented(ast.AstNode node) => throw 'Unimplemented(${node.runtimeType})';
-  visitAssertStatement(ast.AssertStatement node) => unimplemented(node);
+
+  visitAssertStatement(ast.AssertStatement node) => (f, r, s) {
+    return visit(node.condition)(f, (cond) {
+      addStatement(AstFactory.assertStatement(cond));
+      return s();
+    });
+  };
 
   visitBlock(ast.Block node) => (f, r, s) {
     for (var stmt in node.statements.reversed) {
@@ -1074,7 +1100,11 @@ class AsyncTransformer extends ast.AstVisitor {
   visitYieldStatement(ast.YieldStatement node) => unimplemented(node);
 
   // ---- Expressions ----
-  visitAsExpression(ast.AsExpression node) => unimplemented(node);
+  visitAsExpression(ast.AsExpression node) => (f, s) {
+    return visit(node.expression)(f, (expr) {
+      return s(AstFactory.asExpression(expr, node.type));
+    });
+  };
 
   visitAssignmentExpression(ast.AssignmentExpression node) => (f, s) {
     assert(node.leftHandSide is ast.SimpleIdentifier);
@@ -1193,7 +1223,12 @@ class AsyncTransformer extends ast.AstVisitor {
     });
   };
 
-  visitIsExpression(ast.IsExpression node) => unimplemented(node);
+  visitIsExpression(ast.IsExpression node) => (f, s) {
+    return visit(node.expression)(f, (expr) {
+      return s(AstFactory.isExpression(
+          expr, node.notOperator != null, node.type));
+    });
+  };
 
   // ---- Literals ----
   visitBooleanLiteral(ast.BooleanLiteral node) => (f, s) {
@@ -1300,7 +1335,11 @@ class AsyncTransformer extends ast.AstVisitor {
 
   visitPostfixExpression(ast.PostfixExpression node) => unimplemented(node);
 
-  visitPrefixExpression(ast.PrefixExpression node) => unimplemented(node);
+  visitPrefixExpression(ast.PrefixExpression node) => (f, s) {
+    return visit(node.operand)(f, (expr) {
+      return s(AstFactory.prefixExpression(node.operator.type, expr));
+    });
+  };
 
   visitPropertyAccess(ast.PropertyAccess node) => (f, s) {
     return visit(node.target)(f, (expr) {

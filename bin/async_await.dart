@@ -17,14 +17,19 @@ main(List<String> args) {
 
   var errorListener = new ErrorCollector();
   var unit = _parse(new File(args.first), errorListener);
+  if (errorListener.errors.isNotEmpty) {
+    print("Errors:");
+    for (var error in errorListener.errors) {
+      print(error);
+    }
+    exit(1);
+  }
+
   var analysis = new AnalysisVisitor();
   analysis.visit(unit);
   var transform = new AsyncTransformer(analysis.awaits);
   print(transform.visit(unit));
 
-  for (var error in errorListener.errors) {
-    print(error);
-  }
 }
 
 _parse(File file, AnalysisErrorListener errorListener) {
