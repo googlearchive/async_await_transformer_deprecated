@@ -21,8 +21,23 @@ class AnalysisVisitor extends ast.GeneralizingAstVisitor<bool> {
     return false;
   }
 
+  bool visitClassDeclaration(ast.ClassDeclaration node) {
+    node.members.forEach(visit);
+    return false;
+  }
+
+  bool visitFieldDeclaration(ast.FieldDeclaration node) {
+    return false;
+  }
+
+  bool visitMethodDeclaration(ast.MethodDeclaration node) {
+    visit(node.body);
+    return false;
+  }
+
   bool visitFunctionDeclaration(ast.FunctionDeclaration node) {
-    return visit(node.functionExpression.body);
+    visit(node.functionExpression.body);
+    return false;
   }
 
   bool visitTopLevelVariableDeclaration(ast.TopLevelVariableDeclaration node) {
@@ -381,8 +396,33 @@ class AsyncTransformer extends ast.RecursiveAstVisitor<StatementTransformer> {
         node.beginToken,
         node.scriptTag,
         node.directives,
-        node.declarations.map(visit).toList(growable: false),
+        node.declarations.map(visit).toList(),
         node.endToken);
+  }
+
+  visitClassDeclaration(ast.ClassDeclaration node) {
+    return new ast.ClassDeclaration(
+        node.documentationComment,
+        node.metadata,
+        node.abstractKeyword,
+        node.classKeyword,
+        node.name,
+        node.typeParameters,
+        node.extendsClause,
+        node.withClause,
+        node.implementsClause,
+        node.leftBracket,
+        node.members.map(visit).toList(),
+        node.rightBracket);
+  }
+
+  visitFieldDeclaration(ast.FieldDeclaration node) {
+    return node;
+  }
+
+  visitMethodDeclaration(ast.MethodDeclaration node) {
+    node.body = visit(node.body);
+    return node;
   }
 
   visitFunctionDeclaration(ast.FunctionDeclaration node) {
