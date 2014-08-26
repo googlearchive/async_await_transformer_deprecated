@@ -1,12 +1,17 @@
-f(n) async { print(n); return n; }
+import 'dart:async';
+
+import 'package:expect/expect.dart';
+
+var result = "";
+
+f(n) async => n;
 
 g(x, y, z) {
-  print(x);
-  print(y);
-  print(z);
+  result += "${x}${y}${z}";
 }
 
-test0() async {
+main() async {
   var x = 0;
   g(x, x = 1, await f(2));
+  Expect.equals(result, "012");
 }

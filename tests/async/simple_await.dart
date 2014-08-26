@@ -1,13 +1,20 @@
 import 'dart:async';
 
+import 'package:expect/expect.dart';
+
+var result = "";
+
 main() async {
-   await f();
+  var a = f();
+  Expect.isTrue(a is Future);
+  var b = await a;
+  Expect.equals(result, "AB");
 }
 
 f() async {
-   print('A');
-   var b = await g('B');
-   print(b);
+  result += "A";
+  var b = await g('B');
+  result += b;
 }
 
 g(n) {

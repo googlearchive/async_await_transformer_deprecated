@@ -1,9 +1,10 @@
 import 'dart:async';
 
+import 'package:expect/expect.dart';
+
 main() async {
-   await (await f());
+   var x = await (await f());
+   Expect.equals(x, 'A');
 }
 
-f() async {
-  print('A');
-}
+f() async => 'A';

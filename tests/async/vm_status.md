@@ -1,0 +1,26 @@
+# VM test status
+
+- [x] assignments.dart
+- [ ] awaitall.dart
+- [ ] awaitAnyWithCompleter.dart
+- [ ] awaited_arguments.dart
+- [ ] await_inside_finally.dart
+- [ ] await_inside_if.dart
+- [ ] await_inside_switch.dart
+- [ ] await_inside_try.dart
+- [ ] await_inside_while2.dart
+- [ ] await_inside_while.dart
+- [ ] await_return.dart
+- [ ] break-continue.dart
+- [x] double_await.dart
+- [ ] future_of_future.dart
+- [ ] multiple_returns_but_throws.dart
+- [ ] multiple_returns.dart
+- [ ] nested_awaited_arguments.dart
+- [ ] nested_try_catch_finally.dart
+- [ ] return.dart
+- [x] sequences.dart
+- [x] simple_await.dart
+- [ ] throws_all_the_way_down.dart
+- [ ] throws_eventually.dart
+- [ ] throws_immediately.dart
