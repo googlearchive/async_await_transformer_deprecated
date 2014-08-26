@@ -114,6 +114,11 @@ class AnalysisVisitor extends ast.GeneralizingAstVisitor<bool> {
     return maybeAdd(node, result);
   }
 
+  bool visitForEachStatement(ast.ForEachStatement node) {
+    var result = visit(node.iterator);
+    return maybeAdd(node, visit(node.body) || result);
+  }
+
   bool visitIfStatement(ast.IfStatement node) {
     var result = visit(node.condition);
     result = visit(node.thenStatement) || result;
@@ -208,6 +213,10 @@ class AnalysisVisitor extends ast.GeneralizingAstVisitor<bool> {
 
   bool visitPrefixedIdentifier(ast.PrefixedIdentifier node) {
     return false;
+  }
+
+  bool visitPropertyAccess(ast.PropertyAccess node) {
+    return maybeAdd(node, visit(node.target));
   }
 
   bool visitSimpleStringLiteral(ast.SimpleStringLiteral node) {
@@ -750,6 +759,38 @@ class AsyncTransformer extends ast.RecursiveAstVisitor<StatementTransformer> {
     };
   }
 
+  StatementTransformer visitForEachStatement(ast.ForEachStatement node) {
+    var stmt = emptyBlock();
+    var it = newName('it');
+    stmt.statements.add(
+        AstFactory.variableDeclarationStatement2(
+            scanner.Keyword.VAR,
+            [AstFactory.variableDeclaration2(it,
+                AstFactory.propertyAccess2(node.iterator, 'iterator'))]));
+    var body;
+    if (node.identifier != null) {
+      body = block(
+          [AstFactory.assignmentExpression(
+               node.identifier,
+               scanner.TokenType.EQ,
+               AstFactory.propertyAccess2(identifier(it), 'current')),
+           node.body]);
+    } else {
+      assert(node.loopVariable != null);
+      body = block(
+          [AstFactory.variableDeclarationStatement2(
+              scanner.Keyword.keywords[node.loopVariable.keyword.lexeme],
+              [AstFactory.variableDeclaration2(
+                   node.loopVariable.identifier.name,
+                   AstFactory.propertyAccess2(identifier(it), 'current'))]),
+           node.body]);
+    }
+    stmt.statements.add(AstFactory.whileStatement(
+        AstFactory.methodInvocation(identifier(it), 'moveNext', []),
+        body));
+    return visit(stmt);
+  }
+
   StatementTransformer visitIfStatement(ast.IfStatement node) {
     return (ErrorCont f, ReturnCont r, StatementCont s) {
       var hasElse = node.elseStatement != null;
@@ -1159,6 +1200,14 @@ class AsyncExpressionTransformer extends
   ExpressionTransformer visitPrefixedIdentifier(ast.PrefixedIdentifier node) {
     return (ErrorCont f, ExpressionCont s) {
       s(node);
+    };
+  }
+
+  ExpressionTransformer visitPropertyAccess(ast.PropertyAccess node) {
+    return (ErrorCont f, ExpressionCont s) {
+      return visit(node.target)(f, (expr) {
+        return s(AstFactory.propertyAccess(expr, node.propertyName));
+      });
     };
   }
 
