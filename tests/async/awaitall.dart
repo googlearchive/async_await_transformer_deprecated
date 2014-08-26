@@ -1,4 +1,4 @@
-main_async() {
+main() async {
 
   var tasks = [
       constant_async(1), 
@@ -10,11 +10,11 @@ main_async() {
 
 }
 
-constant_async(x){ 
+constant (x) async {
  return x; 
 }
 
-awaitall_async(tasks) {
+awaitall (tasks) async {
    for(var task in tasks) { 
       await(task); 
    }
