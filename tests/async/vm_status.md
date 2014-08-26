@@ -12,14 +12,14 @@
 - [ ] await_inside_while.dart
 - [ ] await_return.dart
 - [ ] break-continue.dart
-- [ ] double_await.dart
+- [x] double_await.dart
 - [ ] future_of_future.dart
 - [ ] multiple_returns_but_throws.dart
 - [ ] multiple_returns.dart
 - [ ] nested_awaited_arguments.dart
 - [ ] nested_try_catch_finally.dart
 - [ ] return.dart
-- [ ] sequences.dart
+- [x] sequences.dart
 - [x] simple_await.dart
 - [ ] throws_all_the_way_down.dart
 - [ ] throws_eventually.dart
