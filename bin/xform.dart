@@ -1,6 +1,7 @@
 import 'package:analyzer/src/generated/ast.dart' as ast;
 import 'package:analyzer/src/generated/scanner.dart' as scanner;
 import 'package:analyzer/src/generated/testing/ast_factory.dart';
+import 'package:analyzer/src/generated/testing/token_factory.dart';
 
 class AnalysisVisitor extends ast.GeneralizingAstVisitor<bool> {
   Set<ast.AstNode> awaits = new Set<ast.AstNode>();
@@ -200,12 +201,38 @@ class AnalysisVisitor extends ast.GeneralizingAstVisitor<bool> {
     return false;
   }
 
+  bool visitIndexExpression(ast.IndexExpression node) {
+    var result = visit(node.target);
+    return maybeAdd(node, visit(node.index) || result);
+  }
+
   bool visitInstanceCreationExpression(ast.InstanceCreationExpression node) {
     return maybeAdd(node, visit(node.argumentList));
   }
 
   bool visitIntegerLiteral(ast.IntegerLiteral node) {
     return false;
+  }
+
+  bool visitListLiteral(ast.ListLiteral node) {
+    var result = false;
+    node.elements.forEach((e) {
+      result = visit(e) || result;
+    });
+    return maybeAdd(node, result);
+  }
+
+  bool visitMapLiteral(ast.MapLiteral node) {
+    var result = false;
+    node.entries.forEach((entry) {
+      result = visit(entry) || result;
+    });
+    return maybeAdd(node, result);
+  }
+
+  bool visitMapLiteralEntry(ast.MapLiteralEntry node) {
+    var result = visit(node.key);
+    return maybeAdd(node, visit(node.value) || result);
   }
 
   bool visitMethodInvocation(ast.MethodInvocation node) {
@@ -240,6 +267,22 @@ class AnalysisVisitor extends ast.GeneralizingAstVisitor<bool> {
 
   bool visitSimpleIdentifier(ast.SimpleIdentifier node) {
     return false;
+  }
+
+  bool visitInterpolationExpression(ast.InterpolationExpression node) {
+    return maybeAdd(node, visit(node.expression));
+  }
+
+  bool visitInterpolationString(ast.InterpolationString node) {
+    return false;
+  }
+
+  bool visitStringInterpolation(ast.StringInterpolation node) {
+    var result = false;
+    node.elements.forEach((elt) {
+      result = visit(elt) || result;
+    });
+    return maybeAdd(node, result);
   }
 
   bool visitSymbolLiteral(ast.SymbolLiteral node) {
@@ -1084,9 +1127,10 @@ class AsyncExpressionTransformer extends
     return fun;
   }
 
-  ExpressionListTransformer translateArgumentList(ast.ArgumentList node) {
+  ExpressionListTransformer translateExpressionList(
+        ast.NodeList<ast.Expression> exprs) {
     return (ErrorCont f, ExpressionListCont s) {
-      if (node.arguments.isEmpty) {
+      if (exprs.isEmpty) {
         return s([]);
       }
       var args = [];
@@ -1095,8 +1139,8 @@ class AsyncExpressionTransformer extends
         args.add(v);
         return s(args);
       };
-      for (var i = node.arguments.length - 1; i >= 1; --i) {
-        var expr = node.arguments[i];
+      for (var i = exprs.length - 1; i >= 1; --i) {
+        var expr = exprs[i];
         seenAwait = seenAwait || awaits.contains(expr);
         var current = cont;
         if (seenAwait) {
@@ -1112,7 +1156,7 @@ class AsyncExpressionTransformer extends
           };
         }
       }
-      return visit(node.arguments.first)(f, cont);
+      return visit(exprs.first)(f, cont);
     };
   }
 
@@ -1182,10 +1226,23 @@ class AsyncExpressionTransformer extends
     };
   }
 
+  ExpressionTransformer visitIndexExpression(ast.IndexExpression node) {
+    return (ErrorCont f, ExpressionCont s) {
+      visit(node.target)(f, (e0) {
+        if (awaits.contains(node.index)) {
+          e0 = owner.addDeclaration('v', e0);
+        }
+        visit(node.index)(f, (e1) {
+          s(AstFactory.indexExpression(e0, e1));
+        });
+      });
+    };
+  }
+
   ExpressionTransformer visitInstanceCreationExpression(
       ast.InstanceCreationExpression node) {
     return (ErrorCont f, ExpressionCont s) {
-      translateArgumentList(node.argumentList)(f, (rands) {
+      translateExpressionList(node.argumentList.arguments)(f, (rands) {
         s(AstFactory.instanceCreationExpression(
             scanner.Keyword.keywords[node.keyword.lexeme],
                 node.constructorName,
@@ -1200,16 +1257,44 @@ class AsyncExpressionTransformer extends
     };
   }
 
+  ExpressionTransformer visitListLiteral(ast.ListLiteral node) {
+    return (ErrorCont f, ExpressionCont s) {
+      translateExpressionList(node.elements)(f, (elts) {
+        s(AstFactory.listLiteral(elts));
+      });
+    };
+  }
+
+  ExpressionTransformer visitMapLiteral(ast.MapLiteral node) {
+    return (ErrorCont f, ExpressionCont s) {
+      var list = new ast.NodeList<ast.Expression>(node);
+      for (var entry in node.entries) {
+        list.add(entry.key);
+        list.add(entry.value);
+      }
+      translateExpressionList(list)(f, (exprs) {
+        var entries = <ast.MapLiteralEntry>[];
+        for (var i = 0; i < exprs.length; i += 2) {
+          entries.add(new ast.MapLiteralEntry(
+              exprs[i],
+              TokenFactory.tokenFromType(scanner.TokenType.COLON),
+              exprs[i + 1]));
+        }
+        s(AstFactory.mapLiteral2(entries));
+      });
+    };
+  }
+
   ExpressionTransformer visitMethodInvocation(ast.MethodInvocation node) {
     return (ErrorCont f, ExpressionCont s) {
       if (node.target != null) {
         visit(node.target)(f, (rator) {
-          translateArgumentList(node.argumentList)(f, (rands) {
+          translateExpressionList(node.argumentList.arguments)(f, (rands) {
             s(AstFactory.methodInvocation(rator, node.methodName.name, rands));
           });
         });
       } else {
-        translateArgumentList(node.argumentList)(f, (rands) {
+        translateExpressionList(node.argumentList.arguments)(f, (rands) {
           s(AstFactory.methodInvocation2(node.methodName.name, rands));
         });
       }
@@ -1260,6 +1345,32 @@ class AsyncExpressionTransformer extends
   ExpressionTransformer visitSimpleIdentifier(ast.SimpleIdentifier node) {
     return (ErrorCont f, ExpressionCont s) {
       s(node);
+    };
+  }
+
+  ExpressionTransformer visitStringInterpolation(
+      ast.StringInterpolation node) {
+    return (ErrorCont f, ExpressionCont s) {
+      var list = new ast.NodeList<ast.Expression>(node);
+      for (var element in node.elements) {
+        if (element is ast.InterpolationExpression) {
+          list.add(element.expression);
+        } else {
+          assert(element is ast.InterpolationString);
+        }
+      }
+      translateExpressionList(list)(f, (exprs) {
+        var elements = <ast.InterpolationElement>[];
+        int index = 0;
+        for (var element in node.elements) {
+          if (element is ast.InterpolationExpression) {
+            elements.add(AstFactory.interpolationExpression(exprs[index++]));
+          } else {
+            elements.add(element);
+          }
+        }
+        s(AstFactory.string(elements));
+      });
     };
   }
 
