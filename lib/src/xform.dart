@@ -1,3 +1,5 @@
+library async_await.src.xform;
+
 import 'package:analyzer/src/generated/ast.dart' as ast;
 import 'package:analyzer/src/generated/scanner.dart' as scanner;
 import 'package:analyzer/src/generated/testing/ast_factory.dart';

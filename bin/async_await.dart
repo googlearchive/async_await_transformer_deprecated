@@ -5,11 +5,13 @@ import 'dart:io';
 import 'package:analyzer/src/generated/error.dart';
 import 'package:analyzer/src/generated/parser.dart';
 import 'package:analyzer/src/generated/scanner.dart';
-import 'xform.dart';
+
+import 'package:async_await/src/error_collector.dart';
+import 'package:async_await/src/xform.dart';
 
 main(List<String> args) {
   if (args.length != 1) {
-    print('Usage: async.dart [file]');
+    print('Usage: async_await.dart [file]');
     exit(0);
   }
 
@@ -33,10 +35,4 @@ _parse(File file, AnalysisErrorListener errorListener) {
   var parser = new Parser(null, errorListener);
   parser.parseAsync = true;
   return parser.parseCompilationUnit(token);
-}
-
-class _ErrorCollector extends AnalysisErrorListener {
-  List<AnalysisError> errors;
-  _ErrorCollector() : errors = new List<AnalysisError>();
-  onError(error) => errors.add(error);
 }

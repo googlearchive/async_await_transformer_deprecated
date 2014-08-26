@@ -7,5 +7,7 @@
 *.cmo
 
 # Pub files.
-packages/
+.pub/
+build/
+packages
 pubspec.lock

@@ -1,4 +1,4 @@
-name: async
+name: async_await
 description: A sample command-line application
 dependencies:
   analyzer: any
