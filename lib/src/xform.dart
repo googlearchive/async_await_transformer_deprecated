@@ -1115,13 +1115,80 @@ class AsyncTransformer extends ast.AstVisitor {
     });
   };
 
+  final Map _assignmentToBinaryOperator = {
+      scanner.TokenType.AMPERSAND_EQ: scanner.TokenType.AMPERSAND,
+      scanner.TokenType.BAR_EQ: scanner.TokenType.BAR,
+      scanner.TokenType.CARET_EQ: scanner.TokenType.CARET,
+      scanner.TokenType.GT_GT_EQ: scanner.TokenType.GT_GT,
+      scanner.TokenType.LT_LT_EQ: scanner.TokenType.LT_LT,
+      scanner.TokenType.MINUS_EQ: scanner.TokenType.MINUS,
+      scanner.TokenType.PERCENT_EQ: scanner.TokenType.PERCENT,
+      scanner.TokenType.PLUS_EQ: scanner.TokenType.PLUS,
+      scanner.TokenType.SLASH_EQ: scanner.TokenType.SLASH,
+      scanner.TokenType.STAR_EQ: scanner.TokenType.STAR,
+      scanner.TokenType.TILDE_SLASH_EQ: scanner.TokenType.TILDE_SLASH,
+    };
+
   visitAssignmentExpression(ast.AssignmentExpression node) => (f, s) {
-    assert(node.leftHandSide is ast.SimpleIdentifier);
-    // TODO(kmillikin): handle compound assignments.
-    visit(node.rightHandSide)(f, (expr) {
-      return s(AstFactory.assignmentExpression(
-              node.leftHandSide, node.operator.type, expr));
-    });
+    finishAssignment(lhs) {
+      var nameLeft = node.operator.type != scanner.TokenType.EQ &&
+          awaits.contains(node.rightHandSide);
+      var lhsValue;
+      if (nameLeft) lhsValue = addTempDeclaration(lhs);
+      return visit(node.rightHandSide)(f, (rhs) {
+        if (nameLeft) {
+          return s(AstFactory.assignmentExpression(lhs, scanner.TokenType.EQ,
+              AstFactory.binaryExpression(lhsValue,
+                  _assignmentToBinaryOperator[node.operator.type],
+                  rhs)));
+        } else {
+          return s(AstFactory.assignmentExpression(lhs,
+              node.operator.type, rhs));
+        }
+      });
+    }
+
+    var lhs = node.leftHandSide;
+    if (lhs is ast.SimpleIdentifier) {
+      return finishAssignment(lhs);
+    } else if (lhs is ast.PrefixedIdentifier) {
+      // TODO(kmillikin): We need resolution to determine what the prefix is.
+      // It could be a class or library name, in which case we do not want
+      // to rename it.  Or it could be a mutable variable in scope, in
+      // which case we do.
+      //
+      // Translate this as if it were a property access, though that could
+      // be wrong.
+      var target = lhs.prefix;
+      if (awaits.contains(node.rightHandSide)) {
+        target = addTempDeclaration(target);
+      }
+      return finishAssignment(
+          AstFactory.propertyAccess(target, lhs.identifier));
+    } else if (lhs is ast.PropertyAccess) {
+      return visit(lhs.target)(f, (target) {
+        if (awaits.contains(node.rightHandSide)) {
+          target = addTempDeclaration(target);
+        }
+        return finishAssignment(
+            AstFactory.propertyAccess(target, lhs.propertyName));
+      });
+    } else if (lhs is ast.IndexExpression) {
+      return visit(lhs.target)(f, (target) {
+        if (awaits.contains(lhs.index) ||
+            awaits.contains(node.rightHandSide)) {
+          target = addTempDeclaration(target);
+        }
+        return visit(lhs.index)(f, (index) {
+          if (awaits.contains(node.rightHandSide)) {
+            index = addTempDeclaration(index);
+          }
+          return finishAssignment(AstFactory.indexExpression(target, index));
+        });
+      });
+    } else {
+      throw  'Unexpected ${lhs.runtimeType} in assignment: $lhs';
+    }
   };
 
   visitAwaitExpression(ast.AwaitExpression node) => (f, s) {
