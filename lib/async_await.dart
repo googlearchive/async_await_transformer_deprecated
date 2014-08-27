@@ -11,15 +11,13 @@ import 'src/xform.dart';
 String compile(String source) {
   var errorListener = new ErrorCollector();
   var unit = _parse(source, errorListener);
-  var analysis = new AnalysisVisitor();
-  analysis.visit(unit);
-  var transform = new AsyncTransformer(analysis.awaits);
 
   if (errorListener.errors.isNotEmpty) {
     throw new FormatException(
       "Compilation error:\n${errorListener.errors.join("\n")}");
   }
 
+  var transform = new AsyncTransformer();
   return transform.visit(unit).toString();
 }
 

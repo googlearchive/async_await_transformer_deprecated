@@ -25,11 +25,8 @@ main(List<String> args) {
     exit(1);
   }
 
-  var analysis = new AnalysisVisitor();
-  analysis.visit(unit);
-  var transform = new AsyncTransformer(analysis.awaits);
+  var transform = new AsyncTransformer();
   print(transform.visit(unit));
-
 }
 
 _parse(File file, AnalysisErrorListener errorListener) {
