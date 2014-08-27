@@ -217,6 +217,14 @@ class AnalysisVisitor extends ast.GeneralizingAstVisitor<bool> {
     return false;
   }
 
+  bool visitConditionalExpression(ast.ConditionalExpression node) {
+    var result = false;
+    [node.condition, node.thenExpression, node.elseExpression].forEach((e) {
+      result = visit(e) || result;
+    });
+    return maybeAdd(node, result);
+  }
+
   bool visitDoubleLiteral(ast.DoubleLiteral node) {
     return false;
   }
@@ -299,6 +307,14 @@ class AnalysisVisitor extends ast.GeneralizingAstVisitor<bool> {
   }
 
   bool visitSimpleIdentifier(ast.SimpleIdentifier node) {
+    return false;
+  }
+
+  bool visitSuperExpression(ast.SuperExpression node) {
+    return false;
+  }
+
+  bool visitThisExpression(ast.ThisExpression node) {
     return false;
   }
 
@@ -1150,9 +1166,24 @@ class AsyncTransformer extends ast.AstVisitor {
 
   visitCascadeExpression(ast.CascadeExpression node) => unimplemented(node);
 
-  visitConditionalExpression(ast.ConditionalExpression node) {
-    unimplemented(node);
-  }
+  visitConditionalExpression(ast.ConditionalExpression node) => (f,s) {
+    return visit(node.condition)(f, (expr) {
+      var joinName = newName('join');
+      addStatement(
+          AstFactory.functionDeclarationStatement(
+              null, null, joinName, reifyErrorCont(s)));
+      s = (r) {
+        addStatement(AstFactory.methodInvocation2(joinName, [r]));
+      };
+      var savedBlock = currentBlock;
+      var thenBlock = currentBlock = emptyBlock();
+      visit(node.thenExpression)(f, s);
+      var elseBlock = currentBlock = emptyBlock();
+      visit(node.elseExpression)(f, s);
+      currentBlock = savedBlock;
+      addStatement(AstFactory.ifStatement2(expr, thenBlock, elseBlock));
+    });
+  };
 
   visitFunctionExpression(ast.FunctionExpression node) => (f, s) {
     // TODO(kmillikin): Handle async bodies.
@@ -1347,9 +1378,13 @@ class AsyncTransformer extends ast.AstVisitor {
     });
   };
 
-  visitSuperExpression(ast.SuperExpression node) => unimplemented(node);
+  visitSuperExpression(ast.SuperExpression node) => (f,s) {
+    s(node);
+  };
 
-  visitThisExpression(ast.ThisExpression node) => unimplemented(node);
+  visitThisExpression(ast.ThisExpression node) => (f,s) {
+    s(node);
+  };
 
   visitThrowExpression(ast.ThrowExpression node) => (f, s) {
     return visit(node.expression)(f, (e) => f(e));
