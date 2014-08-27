@@ -392,10 +392,9 @@ class AsyncTransformer extends ast.AstVisitor {
 
   ast.Block currentBlock;
   List<ast.Expression> breakTargets;
-  List<ast.Expression> breakLabels;
+  List<String> breakLabels;
 
   List<ast.Expression> continueTargets;
-  List<ast.Expression> continueLabels;
 
   visit(ast.AstNode node) => node.accept(this);
 
@@ -416,7 +415,6 @@ class AsyncTransformer extends ast.AstVisitor {
     breakTargets = <ast.Expression>[];
     breakLabels = <String>[];
     continueTargets = <ast.Expression>[];
-    continueLabels = <ast.Expression>[];
     awaits = analysis.awaits;
     names = analysis.names;
   }
@@ -626,11 +624,12 @@ class AsyncTransformer extends ast.AstVisitor {
     var target;
 
     if (node.label != null) {
-      var i;
-      for(i = breakLabels.length-1; i >= 0; i--) {
-        if(breakLabels[i] == node.label.name) break;
+      for (var i = breakLabels.length - 1; i >= 0; i--) {
+        if(breakLabels[i] == node.label.name) {
+          target = breakTargets[i];
+          break;
+        }
       }
-      target = breakTargets[i];
     } else {
       target = breakTargets.last;
     }
@@ -673,7 +672,7 @@ class AsyncTransformer extends ast.AstVisitor {
         AstFactory.functionDeclarationStatement(null, null, continueName,
             functionExpression([newName('x')], continueBlock)));
     breakTargets.add(identifier(breakName));
-    breakLabels.add(breakName);
+    breakLabels.add(null);
     continueTargets.add(identifier(continueName));
     visit(node.body)(f, r, () {
       addStatement(
@@ -820,7 +819,7 @@ class AsyncTransformer extends ast.AstVisitor {
 
     var bodyBlock = currentBlock = emptyBlock();
     breakTargets.add(identifier(breakName));
-    breakLabels.add(breakName);
+    breakLabels.add(null);
     continueTargets.add(identifier(continueName));
     visit(node.body)(f, r, () {
       addStatement(
@@ -1121,7 +1120,7 @@ class AsyncTransformer extends ast.AstVisitor {
       var bodyBlock = currentBlock = emptyBlock();
 
       breakTargets.add(identifier(breakName));
-      breakLabels.add(breakName);
+      breakLabels.add(null);
 
       continueTargets.add(identifier(continueName));
 
