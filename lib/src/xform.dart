@@ -137,8 +137,28 @@ class Analysis extends ast.GeneralizingAstVisitor<bool> {
     return maybeAdd(node, visit(node.expression));
   }
 
+  bool visitSwitchCase(ast.SwitchCase node) {
+    var result = visit(node.expression);
+    for (var s in node.statements) {
+      if (visit(s)) result = true;
+    }
+    return maybeAdd(node, result);
+  }
+
+  bool visitSwitchDefault(ast.SwitchDefault node) {
+    var result = false;
+    for (var s in node.statements) {
+      if (visit(s)) result = true;
+    }
+    return maybeAdd(node, result);
+  }
+
   bool visitSwitchStatement(ast.SwitchStatement node) {
-    throw 'Analysis: unimplemented(SwitchStatement)';
+    var result = visit(node.expression);
+    for (var m in node.members) {
+      if (visit(m)) result = true;
+    }
+    return maybeAdd(node, result);
   }
 
   bool visitTryStatement(ast.TryStatement node) {
@@ -609,12 +629,16 @@ class AsyncTransformer extends ast.AstVisitor {
     });
   };
 
-  visitBlock(ast.Block node) => (f, r, s) {
-    for (var stmt in node.statements.reversed) {
+  _translateStatementList(ast.NodeList<ast.Statement> list, f, r, s) {
+    for (var stmt in list.reversed) {
       var nextCont = s;
       s = () => visit(stmt)(f, r, nextCont);
     }
     return s();
+  }
+
+  visitBlock(ast.Block node) => (f, r, s) {
+    return _translateStatementList(node.statements, f, r, s);
   };
 
   visitBreakStatement(ast.BreakStatement node) => (f, r, s) {
@@ -896,7 +920,83 @@ class AsyncTransformer extends ast.AstVisitor {
         : visit(node.expression)(f, (v) => r(v));
   };
 
-  visitSwitchStatement(ast.SwitchStatement node) => unimplemented(node);
+  visitSwitchStatement(ast.SwitchStatement node) => (f, r, s) {
+    return visit(node.expression)(f, (expr) {
+      var breakName = newName('break');
+      ast.FunctionExpression breakFun = reifyStatementCont(s);
+      breakFun.parameters = AstFactory.formalParameterList(
+          [AstFactory.simpleFormalParameter3(newName('x'))]);
+      addStatement(
+          AstFactory.functionDeclarationStatement(
+              null, null, breakName, breakFun));
+
+      // Generate a name per labeled case.
+      var continueNames = [];
+      for (var member in node.members) {
+        if (member.labels.isNotEmpty) continueNames.add(newName('continue'));
+      }
+
+      // Translate the cases with bindings for the break and possible
+      // continues.
+      breakTargets.add(identifier(breakName));
+      continueTargets.addAll(continueNames.map(identifier));
+      if (continueNames.isNotEmpty) {
+        // Add declarations for mutable continue functions.
+        addStatement(
+            AstFactory.variableDeclarationStatement2(scanner.Keyword.VAR,
+                continueNames.map(AstFactory.variableDeclaration).toList()));
+
+        // Translate the labeled cases as recursive functions.
+        var index = 0;
+        for (var member in node.members) {
+          if (member.labels.isEmpty) continue;
+          var savedBlock = currentBlock;
+          var caseBlock = currentBlock = emptyBlock();
+          _translateStatementList(member.statements, f, r, () {
+            addStatement(AstFactory.functionExpressionInvocation(
+                identifier(breakName), [nullLiteral()]));
+          });
+          currentBlock = savedBlock;
+          addStatement(AstFactory.assignmentExpression(
+              identifier(continueNames[index]), scanner.TokenType.EQ,
+              functionExpression([newName('x')], caseBlock)));
+          ++index;
+        }
+      }
+
+      // Translate the unlabeled cases as blocks and the labeled cases as
+      // calls to the corresponding continue function.
+      var savedBlock = currentBlock;
+      var members = [];
+      var index = 0;
+      for (var member in node.members) {
+        var bodyBlock;
+        if (member.labels.isEmpty) {
+          bodyBlock = currentBlock = emptyBlock();
+          _translateStatementList(member.statements, f, r, () {
+            addStatement(AstFactory.functionExpressionInvocation(
+                identifier(breakName), [nullLiteral()]));
+          });
+        } else {
+          bodyBlock = block([AstFactory.functionExpressionInvocation(
+              identifier(continueNames[index]), [nullLiteral()])]);
+          ++index;
+        }
+        // Cases must end with return, break, continue, or throw.
+        bodyBlock.statements.add(AstFactory.returnStatement());
+        if (member is ast.SwitchDefault) {
+          members.add(AstFactory.switchDefault2(bodyBlock.statements));
+        } else {
+          members.add(AstFactory.switchCase(member.expression,
+              bodyBlock.statements));
+        }
+      }
+      breakTargets.removeLast();
+      continueTargets.length -= continueNames.length;
+      currentBlock = savedBlock;
+      addStatement(AstFactory.switchStatement(expr, members));
+    });
+  };
 
   visitCatchClause(ast.CatchClause node) => (f, r, s) {
     // TODO(kmillikin): handle 'on T catch' clauses.
