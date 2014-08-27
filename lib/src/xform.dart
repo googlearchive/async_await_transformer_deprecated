@@ -656,7 +656,7 @@ class AsyncTransformer extends ast.AstVisitor {
     var loopBlock = currentBlock = emptyBlock();
     addStatement(
         AstFactory.functionDeclarationStatement(null, null, continueName,
-            functionExpression(['_'], continueBlock)));
+            functionExpression([newName('x')], continueBlock)));
     breakTargets.add(identifier(breakName));
     continueTargets.add(identifier(continueName));
     visit(node.body)(f, r, () {
@@ -670,10 +670,10 @@ class AsyncTransformer extends ast.AstVisitor {
     currentBlock = savedBlock;
     addStatement(
         AstFactory.functionDeclarationStatement(null, null, breakName,
-            functionExpression(['_'], breakBlock)));
+            functionExpression([newName('x')], breakBlock)));
     addStatement(
         AstFactory.functionDeclarationStatement(null, null, loopName,
-            functionExpression(['_'], loopBlock)));
+            functionExpression([newName('x')], loopBlock)));
     addStatement(
         AstFactory.functionExpressionInvocation(
             identifier(loopName), [nullLiteral()]));
@@ -790,7 +790,7 @@ class AsyncTransformer extends ast.AstVisitor {
                                         identifier('wait')),
                   [AstFactory.listLiteral([])]),
               'then',
-              [functionExpression (['_'],
+              [functionExpression ([newName('x')],
                   AstFactory.functionExpressionInvocation(
                       identifier(loopName),
                       parameters))]));
@@ -815,7 +815,7 @@ class AsyncTransformer extends ast.AstVisitor {
     var loopBlock = currentBlock = emptyBlock();
     addStatement(
         AstFactory.functionDeclarationStatement(null, null, continueName,
-            functionExpression(['_'], continueBlock)));
+            functionExpression([newName('x')], continueBlock)));
     if (node.condition != null) {
       visit(node.condition)(f, (expr) {
         addStatement(AstFactory.ifStatement2(
@@ -831,7 +831,7 @@ class AsyncTransformer extends ast.AstVisitor {
     currentBlock = savedBlock;
     addStatement(
         AstFactory.functionDeclarationStatement(null, null, breakName,
-            functionExpression(['_'], breakBlock)));
+            functionExpression([newName('x')], breakBlock)));
     addStatement(
         AstFactory.functionDeclarationStatement(null, null, loopName,
             functionExpression(parameters.map((e) => e.name).toList(),
@@ -907,7 +907,7 @@ class AsyncTransformer extends ast.AstVisitor {
     var joinName = newName('join');
     ast.FunctionExpression joinFun = reifyStatementCont(s);
     joinFun.parameters = AstFactory.formalParameterList(
-        [AstFactory.simpleFormalParameter3('_')]);
+        [AstFactory.simpleFormalParameter3(newName('x'))]);
     addStatement(
         AstFactory.functionDeclarationStatement(null, null, joinName, joinFun));
 
@@ -936,15 +936,15 @@ class AsyncTransformer extends ast.AstVisitor {
     var savedContinueTargets = continueTargets;
     breakTargets = breakTargets.map((expr) {
       return AstFactory.parenthesizedExpression(
-              functionExpression(['_'],
+              functionExpression([newName('x')],
                   AstFactory.functionExpressionInvocation(
-                      identifier(finallyName), [expr, identifier('_')])));
+                      identifier(finallyName), [expr, nullLiteral()])));
     }).toList();
     continueTargets = continueTargets.map((expr) {
       return AstFactory.parenthesizedExpression(
-          functionExpression(['_'],
+          functionExpression([newName('x')],
                AstFactory.functionExpressionInvocation(
-                  identifier(finallyName), [expr, identifier('_')])));
+                  identifier(finallyName), [expr, nullLiteral()])));
     }).toList();
     if (node.catchClauses.isNotEmpty) {
       assert(node.catchClauses.length == 1);
@@ -1089,7 +1089,7 @@ class AsyncTransformer extends ast.AstVisitor {
                                       identifier('wait')),
                 [AstFactory.listLiteral([])]),
             'then',
-            [functionExpression(['_'], bodyBlock)])]),
+            [functionExpression([newName('x')], bodyBlock)])]),
         block([AstFactory.functionExpressionInvocation(
             identifier(breakName), [nullLiteral()])])));
     });
@@ -1097,10 +1097,10 @@ class AsyncTransformer extends ast.AstVisitor {
     currentBlock = savedBlock;
     addStatement(
         AstFactory.functionDeclarationStatement(null, null, breakName,
-            functionExpression(['_'], breakBlock)));
+            functionExpression([newName('x')], breakBlock)));
     addStatement(
         AstFactory.functionDeclarationStatement(null, null, continueName,
-            functionExpression(['_'], continueBlock)));
+            functionExpression([newName('x')], continueBlock)));
     addStatement(
         AstFactory.functionExpressionInvocation(
             identifier(continueName), [nullLiteral()]));
