@@ -5,8 +5,9 @@ import 'package:analyzer/src/generated/scanner.dart' as scanner;
 import 'package:analyzer/src/generated/testing/ast_factory.dart';
 import 'package:analyzer/src/generated/testing/token_factory.dart';
 
-class AnalysisVisitor extends ast.GeneralizingAstVisitor<bool> {
+class Analysis extends ast.GeneralizingAstVisitor<bool> {
   Set<ast.AstNode> awaits = new Set<ast.AstNode>();
+  Set<String> names = new Set<String>();
 
   bool maybeAdd(ast.AstNode node, bool shouldAdd) {
     if (shouldAdd) awaits.add(node);
@@ -16,98 +17,45 @@ class AnalysisVisitor extends ast.GeneralizingAstVisitor<bool> {
   bool visit(ast.AstNode node) => node.accept(this);
 
   bool visitNode(ast.AstNode node) {
-    throw 'Unimplemented(${node.runtimeType})';
-  }
-
-  bool visitCompilationUnit(ast.CompilationUnit node) {
-    node.declarations.forEach(visit);
-    return false;
-  }
-
-  bool visitClassDeclaration(ast.ClassDeclaration node) {
-    node.members.forEach(visit);
-    return false;
-  }
-
-  bool visitConstructorDeclaration(ast.ConstructorDeclaration node) {
-    return false;
-  }
-
-  bool visitFieldDeclaration(ast.FieldDeclaration node) {
-    return false;
-  }
-
-  bool visitMethodDeclaration(ast.MethodDeclaration node) {
-    visit(node.body);
-    return false;
-  }
-
-  bool visitFunctionDeclaration(ast.FunctionDeclaration node) {
-    visit(node.functionExpression.body);
-    return false;
-  }
-
-  bool visitTopLevelVariableDeclaration(ast.TopLevelVariableDeclaration node) {
-    return false;
-  }
-
-  bool visitBlockFunctionBody(ast.BlockFunctionBody node) {
-    if (node.isSynchronous || node.isGenerator) return false;
-    visit(node.block);
-    return false;
-  }
-
-  bool visitExpressionFunctionBody(ast.ExpressionFunctionBody node) {
-    if (node.isSynchronous || node.isGenerator) return false;
-    visit(node.expression);
-    return false;
-  }
-
-  bool visitEmptyFunctionBody(ast.EmptyFunctionBody node) {
-    return false;
-  }
-
-  bool visitFunctionTypeAlias(ast.FunctionTypeAlias node) {
-    return false;
+    throw 'Analysis: unreachable(${node.runtimeType})';
   }
 
   bool visitArgumentList(ast.ArgumentList node) {
     var result = false;
-    node.arguments.forEach((e) {
-      result = visit(e) || result;
-    });
+    for (var e in node.arguments) {
+      if (visit(e)) result = true;
+    }
     return maybeAdd(node, result);
   }
 
   bool visitCatchClause(ast.CatchClause node) {
-    assert(node.onKeyword == null);
-    assert(node.stackTraceParameter == null);
     return maybeAdd(node, visit(node.body));
   }
 
   bool visitVariableDeclarationList(ast.VariableDeclarationList node) {
     var result = false;
-    node.variables.forEach((d) {
-      result = visit(d) || result;
-    });
+    for (var d in node.variables) {
+      if (visit(d)) result = true;
+    }
     return maybeAdd(node, result);
   }
 
   bool visitVariableDeclaration(ast.VariableDeclaration node) {
+    names.add(node.name.name);
     if (node.initializer == null) return false;
     return maybeAdd(node, visit(node.initializer));
   }
 
-  // Statements
+  // ---- Statements ----
   bool visitAssertStatement(ast.AssertStatement node) {
     return maybeAdd(node, visit(node.condition));
   }
 
   bool visitBlock(ast.Block node) {
     var result = false;
-    node.statements.forEach((s) {
-      result = visit(s) || result;
-    });
+    for (var s in node.statements) {
+      if (visit(s)) result = true;
+    }
     return maybeAdd(node, result);
   }
 
@@ -132,6 +80,17 @@ class AnalysisVisitor extends ast.GeneralizingAstVisitor<bool> {
     return maybeAdd(node, visit(node.expression));
   }
 
+  bool visitForEachStatement(ast.ForEachStatement node) {
+    if (node.identifier != null) {
+      names.add(node.identifier.name);
+    } else {
+      assert(node.loopVariable != null);
+      names.add(node.loopVariable.identifier.name);
+    }
+    var result = visit(node.iterator);
+    return maybeAdd(node, visit(node.body) || result);
+  }
+
   bool visitForStatement(ast.ForStatement node) {
     var result = false;
     if (node.variables != null) {
@@ -140,29 +99,37 @@ class AnalysisVisitor extends ast.GeneralizingAstVisitor<bool> {
       result = visit(node.initialization);
     }
     if (node.condition != null) {
-      result = visit(node.condition) || result;
+      if (visit(node.condition)) result = true;
     }
-    result = visit(node.body) || result;
+    if (visit(node.body)) result = true;
     if (node.updaters != null) {
-      node.updaters.forEach((e) {
-        result = visit(e) || result;
-      });
+      for (var e in node.updaters) {
+        if (visit(e)) result = true;
+      }
     }
     return maybeAdd(node, result);
   }
 
-  bool visitForEachStatement(ast.ForEachStatement node) {
-    var result = visit(node.iterator);
-    return maybeAdd(node, visit(node.body) || result);
+  bool visitFunctionDeclarationStatement(
+      ast.FunctionDeclarationStatement node) {
+    return false;
   }
 
   bool visitIfStatement(ast.IfStatement node) {
     var result = visit(node.condition);
-    result = visit(node.thenStatement) || result;
+    if (visit(node.thenStatement)) result = true;
     if (node.elseStatement != null) {
-      result = visit(node.elseStatement) || result;
+      if (visit(node.elseStatement)) result = true;
     }
     return maybeAdd(node, result);
+  }
+
+  bool visitLabeledStatement(ast.LabeledStatement node) {
+    return maybeAdd(node, visit(node.statement));
+  }
+
+  bool visitRethrowExpression(ast.RethrowExpression node) {
+    return false;
   }
 
   bool visitReturnStatement(ast.ReturnStatement node) {
@@ -170,14 +137,20 @@ class AnalysisVisitor extends ast.GeneralizingAstVisitor<bool> {
     return maybeAdd(node, visit(node.expression));
   }
 
+  bool visitSwitchStatement(ast.SwitchStatement node) {
+    throw 'Analysis: unimplemented(SwitchStatement)';
+  }
+
   bool visitTryStatement(ast.TryStatement node) {
     var result = visit(node.body);
     if (node.catchClauses.isNotEmpty) {
-      assert(node.catchClauses.length == 1);
-      result = visit(node.catchClauses.first) || result;
+      if (node.catchClauses.length != 1) {
+        throw 'Analysis: unimplemented(TryStatement)';
+      }
+      if (visit(node.catchClauses.first)) result = true;
     }
     if (node.finallyBlock != null) {
-      result = visit(node.finallyBlock) || result;
+      if (visit(node.finallyBlock)) result = true;
     }
     return maybeAdd(node, result);
   }
@@ -192,7 +165,15 @@ class AnalysisVisitor extends ast.GeneralizingAstVisitor<bool> {
     return maybeAdd(node, visit(node.body) || result);
   }
 
-  // Expressions
+  bool visitYieldStatement(ast.YieldStatement node) {
+    return maybeAdd(node, visit(node.expression));
+  }
+
+  // ---- Expressions ----
+  bool visitExpression(ast.Expression node) {
+    throw 'Analysis: unimplemented(${node.runtimeType})';
+  }
+
   bool visitAsExpression(ast.AsExpression node) {
     return maybeAdd(node, visit(node.expression));
   }
@@ -218,11 +199,9 @@ class AnalysisVisitor extends ast.GeneralizingAstVisitor<bool> {
   }
 
   bool visitConditionalExpression(ast.ConditionalExpression node) {
-    var result = false;
-    [node.condition, node.thenExpression, node.elseExpression].forEach((e) {
-      result = visit(e) || result;
-    });
-    return maybeAdd(node, result);
+    var result = visit(node.condition);
+    if (visit(node.thenExpression)) result = true;
+    return maybeAdd(node, visit(node.elseExpression) || result);
   }
 
   bool visitDoubleLiteral(ast.DoubleLiteral node) {
@@ -230,7 +209,6 @@ class AnalysisVisitor extends ast.GeneralizingAstVisitor<bool> {
   }
 
   bool visitFunctionExpression(ast.FunctionExpression node) {
-    visit(node.body);
     return false;
   }
 
@@ -253,17 +231,17 @@ class AnalysisVisitor extends ast.GeneralizingAstVisitor<bool> {
 
   bool visitListLiteral(ast.ListLiteral node) {
     var result = false;
-    node.elements.forEach((e) {
-      result = visit(e) || result;
-    });
+    for (var e in node.elements) {
+      if (visit(e)) result = true;
+    }
     return maybeAdd(node, result);
   }
 
   bool visitMapLiteral(ast.MapLiteral node) {
     var result = false;
-    node.entries.forEach((entry) {
-      result = visit(entry) || result;
-    });
+    for (var entry in node.entries) {
+      if (visit(entry)) result = true;
+    }
     return maybeAdd(node, result);
   }
 
@@ -274,8 +252,7 @@ class AnalysisVisitor extends ast.GeneralizingAstVisitor<bool> {
 
   bool visitMethodInvocation(ast.MethodInvocation node) {
     var result = node.target != null && visit(node.target);
-    result = visit(node.argumentList) || result;
-    return maybeAdd(node, result);
+    return maybeAdd(node, visit(node.argumentList) || result);
   }
 
   bool visitNamedExpression(ast.NamedExpression node) {
@@ -291,6 +268,8 @@ class AnalysisVisitor extends ast.GeneralizingAstVisitor<bool> {
   }
 
   bool visitPrefixedIdentifier(ast.PrefixedIdentifier node) {
+    names.add(node.prefix.name);
+    names.add(node.identifier.name);
     return false;
   }
 
@@ -307,6 +286,7 @@ class AnalysisVisitor extends ast.GeneralizingAstVisitor<bool> {
   }
 
   bool visitSimpleIdentifier(ast.SimpleIdentifier node) {
+    names.add(node.name);
     return false;
   }
 
@@ -328,9 +308,9 @@ class AnalysisVisitor extends ast.GeneralizingAstVisitor<bool> {
 
   bool visitStringInterpolation(ast.StringInterpolation node) {
     var result = false;
-    node.elements.forEach((elt) {
-      result = visit(elt) || result;
-    });
+    for (var elt in node.elements) {
+      if (visit(elt)) result = true;
+    }
     return maybeAdd(node, result);
   }
 
@@ -369,7 +349,7 @@ ast.FunctionExpression functionExpression(List<String> parameters,
 ast.VariableDeclarationStatement variableDeclaration(
     String name, ast.Expression initializer) {
   return AstFactory.variableDeclarationStatement2(
-          scanner.Keyword.VAR,
+          scanner.Keyword.FINAL,
           [AstFactory.variableDeclaration2(name, initializer)]);
 }
 
@@ -407,32 +387,45 @@ ast.MethodInvocation methodInvocation(receiver,
 }
 
 class AsyncTransformer extends ast.AstVisitor {
-  final Set<ast.AstNode> awaits;
+  Set<ast.AstNode> awaits;
+  Set<String> names;
 
   ast.Block currentBlock;
   List<ast.Expression> breakTargets;
   List<ast.Expression> continueTargets;
 
-  AsyncTransformer(this.awaits);
-
   visit(ast.AstNode node) => node.accept(this);
 
-  int counter = 0;
+  Map<String, int> nameCounters;
 
-  // TODO: Safely generate fresh identifiers.
-  String newName(String base) => '$base${counter++}';
+  String newName(String base) {
+    if (!nameCounters.containsKey(base)) nameCounters[base] = 0;
+    var name;
+    do {
+      name = '$base${nameCounters[base]++}';
+    } while (names.contains(name));
+    return name;
+  }
+
+  void reset(Analysis analysis) {
+    nameCounters = <String, int>{};
+    currentBlock = emptyBlock();
+    breakTargets = <ast.Expression>[];
+    continueTargets = <ast.Expression>[];
+    awaits = analysis.awaits;
+    names = analysis.names;
+  }
 
   /// Insert a declaration with initial value [expr] in [currentBlock] and
   /// return the fresh name.
   ///
   /// No declaration is added if the expression is already a value and [force]
   /// is false.
-  ast.Expression addDeclaration(String base, ast.Expression expr,
-      {force: false}) {
-    if (!force && expr is ast.Literal) {
+  ast.Expression addTempDeclaration(ast.Expression expr) {
+    if (expr is ast.Literal && expr is! ast.TypedLiteral) {
       return expr;
     }
-    var name = newName(base);
+    var name = newName('v');
     addStatement(variableDeclaration(name, expr));
     return identifier(name);
   }
@@ -552,23 +545,23 @@ class AsyncTransformer extends ast.AstVisitor {
   visitBlockFunctionBody(ast.BlockFunctionBody node) {
     if (node.isSynchronous || node.isGenerator) return node;
 
-    counter = 0;
-    currentBlock = emptyBlock();
-    breakTargets = <ast.Expression>[];
-    continueTargets = <ast.Expression>[];
-    var result = newName('completer');
+    Analysis analysis = new Analysis();
+    analysis.visit(node.block);
+    reset(analysis);
+
+    var completer = newName('completer');
     visit(node.block)((e) {
-      addStatement(methodInvocation(result, 'completeError', [e]));
+      addStatement(methodInvocation(completer, 'completeError', [e]));
     }, (v) {
-      addStatement(methodInvocation(result, 'complete', [v]));
+      addStatement(methodInvocation(completer, 'complete', [v]));
     }, () {
-      addStatement(methodInvocation(result, 'complete', [nullLiteral()]));
+      addStatement(methodInvocation(completer, 'complete', [nullLiteral()]));
     });
 
     String exnName = newName('e');
     return AstFactory.blockFunctionBody2(
         [variableDeclaration(
-              result,
+              completer,
               AstFactory.instanceCreationExpression2(
                   scanner.Keyword.NEW,
                   AstFactory.typeName4('Completer', []),
@@ -584,11 +577,11 @@ class AsyncTransformer extends ast.AstVisitor {
                                   exnName,
                                   [AstFactory.expressionStatement(
                                         AstFactory.methodInvocation(
-                                            identifier(result),
+                                            identifier(completer),
                                             'completeError',
                                             [identifier(exnName)]))])]))])),
           AstFactory.returnStatement2(
-              AstFactory.propertyAccess2(identifier(result), 'future'))]);
+              AstFactory.propertyAccess2(identifier(completer), 'future'))]);
   }
 
   visitEmptyFunctionBody(ast.EmptyFunctionBody node) {
@@ -759,7 +752,7 @@ class AsyncTransformer extends ast.AstVisitor {
       var nextCont = cont;
       var copiedSeenAwait = seenAwait;
       cont = (e) {
-        if (copiedSeenAwait) e = addDeclaration('v', e);
+        if (copiedSeenAwait) e = addTempDeclaration(e);
         exprs.add(e);
         return (nextExpr == null)
             ? nextCont(nullLiteral())
@@ -1156,7 +1149,7 @@ class AsyncTransformer extends ast.AstVisitor {
     assert(node.operator.lexeme != '||' && node.operator.lexeme != '&&');
     return visit(node.leftOperand)(f, (left) {
       if (awaits.contains(node.rightOperand)) {
-        left = addDeclaration('v', left);
+        left = addTempDeclaration(left);
       }
       return visit(node.rightOperand)(f, (right) {
         s(AstFactory.binaryExpression(left, node.operator.type, right));
@@ -1206,7 +1199,7 @@ class AsyncTransformer extends ast.AstVisitor {
   visitIndexExpression(ast.IndexExpression node) => (f, s) {
     visit(node.target)(f, (e0) {
       if (awaits.contains(node.index)) {
-        e0 = addDeclaration('v', e0);
+        e0 = addTempDeclaration(e0);
       }
       visit(node.index)(f, (e1) {
         s(AstFactory.indexExpression(e0, e1));
@@ -1230,7 +1223,7 @@ class AsyncTransformer extends ast.AstVisitor {
       var current = cont;
       if (seenAwait) {
         cont = (v) {
-          var value = addDeclaration('v', v);
+          var value = addTempDeclaration(v);
           args.add(value);
           visit(expr)(f, current);
         };
@@ -1341,7 +1334,7 @@ class AsyncTransformer extends ast.AstVisitor {
     if (node.target != null) {
       visit(node.target)(f, (rator) {
         if (awaits.contains(node.argumentList)) {
-          rator = addDeclaration('v', rator);
+          rator = addTempDeclaration(rator);
         }
         _translateExpressionList(node.argumentList.arguments)(f, (rands) {
           s(AstFactory.methodInvocation(rator, node.methodName.name, rands));
