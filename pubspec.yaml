@@ -1,4 +1,5 @@
 name: async_await
-description: A sample command-line application
+description: Compile-time support for "async/await" syntax in Dart.
 dependencies:
-  analyzer: any
+  analyzer: ">=0.22.3 <0.23.0"
+  barback: ">=0.15.0 <0.16.0"
