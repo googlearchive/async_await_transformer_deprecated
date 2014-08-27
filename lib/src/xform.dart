@@ -199,11 +199,9 @@ class Analysis extends ast.GeneralizingAstVisitor<bool> {
   }
 
   bool visitConditionalExpression(ast.ConditionalExpression node) {
-    var result = false;
-    [node.condition, node.thenExpression, node.elseExpression].forEach((e) {
-      result = visit(e) || result;
-    });
-    return maybeAdd(node, result);
+    var result = visit(node.condition);
+    if (visit(node.thenExpression)) result = true;
+    return maybeAdd(node, visit(node.elseExpression) || result);
   }
 
   bool visitDoubleLiteral(ast.DoubleLiteral node) {
