@@ -249,6 +249,12 @@ class Analysis extends ast.GeneralizingAstVisitor<bool> {
     return maybeAdd(node, visit(node.expression));
   }
 
+  bool visitFunctionExpressionInvocation(
+      ast.FunctionExpressionInvocation node) {
+    var result = visit(node.function);
+    return maybeAdd(node, visit(node.argumentList) || result);
+  }
+
   bool visitListLiteral(ast.ListLiteral node) {
     var result = false;
     for (var e in node.elements) {
@@ -1346,13 +1352,23 @@ class AsyncTransformer extends ast.AstVisitor {
   };
 
   visitFunctionExpression(ast.FunctionExpression node) => (f, s) {
-    // TODO(kmillikin): Handle async bodies.
+    if (node.body.isAsynchronous && !node.body.isGenerator) {
+      throw 'Transformation: unimplemented(async FunctionExpression)';
+    }
     return s(node);
   };
 
-  visitFunctionExpressionInvocation(ast.FunctionExpressionInvocation node) {
-    unimplemented(node);
-  }
+  visitFunctionExpressionInvocation(
+      ast.FunctionExpressionInvocation node) => (f, s) {
+    return visit(node.function)(f, (rator) {
+      if (awaits.contains(node.argumentList)) {
+        rator = addTempDeclaration(rator);
+      }
+      return _translateExpressionList(node.argumentList.arguments)(f, (rands) {
+        return s(AstFactory.functionExpressionInvocation(rator, rands));
+      });
+    });
+  };
 
   // ---- Identifiers ----
   visitSimpleIdentifier(ast.SimpleIdentifier node) => (f, s) {
