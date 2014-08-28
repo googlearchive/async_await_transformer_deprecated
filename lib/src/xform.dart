@@ -580,7 +580,13 @@ class AsyncTransformer extends ast.AstVisitor {
 
   // ---- FunctionBodies ----
   visitBlockFunctionBody(ast.BlockFunctionBody node) {
-    if (node.isSynchronous || node.isGenerator) return node;
+    if (node.isGenerator) {
+      throw 'Transfomer: unsupported generator function.';
+    }
+    if (node.isSynchronous) {
+      new SyncTransformer().visit(node);
+      return node;
+    }
 
     Analysis analysis = new Analysis();
     analysis.visit(node.block);
@@ -913,9 +919,12 @@ class AsyncTransformer extends ast.AstVisitor {
     }
   };
 
-  visitFunctionDeclarationStatement(ast.FunctionDeclarationStatement node) {
-    return unimplemented(node);
-  }
+  visitFunctionDeclarationStatement(
+      ast.FunctionDeclarationStatement node) => (f, r, s) {
+    var decl = new AsyncTransformer().visit(node.functionDeclaration);
+    addStatement(new ast.FunctionDeclarationStatement(decl));
+    return s();
+  };
 
   visitIfStatement(ast.IfStatement node) => (f, r, s) {
     var hasElse = node.elseStatement != null;
@@ -1362,23 +1371,14 @@ class AsyncTransformer extends ast.AstVisitor {
   };
 
   visitAwaitExpression(ast.AwaitExpression node) => (f, s) {
-    if (awaits.contains(node.expression)) {
-      visit(node.expression)(f, (expr) {
-        addStatement(
-            AstFactory.methodInvocation(
-                expr,
-                'then',
-                [reifyExpressionCont(s, f),
-                  AstFactory.namedExpression2('onError', reifyErrorCont(f))]));
-      });
-    } else {
+    visit(node.expression)(f, (expr) {
       addStatement(
           AstFactory.methodInvocation(
-              node.expression,
+              expr,
               'then',
               [reifyExpressionCont(s, f),
                 AstFactory.namedExpression2('onError', reifyErrorCont(f))]));
-    }
+    });
   };
 
   visitBinaryExpression(ast.BinaryExpression node) => (f, s) {
@@ -1416,10 +1416,8 @@ class AsyncTransformer extends ast.AstVisitor {
   };
 
   visitFunctionExpression(ast.FunctionExpression node) => (f, s) {
-    if (node.body.isAsynchronous && !node.body.isGenerator) {
-      throw 'Transformation: unimplemented(async FunctionExpression)';
-    }
-    return s(node);
+    node.body = new AsyncTransformer().visit(node.body);
+    return s(AstFactory.parenthesizedExpression(node));
   };
 
   visitFunctionExpressionInvocation(
@@ -1693,4 +1691,20 @@ class AsyncTransformer extends ast.AstVisitor {
   visitVariableDeclaration(node) => unreachable(node);
   visitVariableDeclarationList(node) => unreachable(node);
   visitWithClause(node) => unreachable(node);
+}
+
+class SyncTransformer extends ast.RecursiveAstVisitor {
+  visit(ast.AstNode node) => node.accept(this);
+
+  visitFunctionExpression(ast.FunctionExpression node) {
+    if (node.body.isGenerator) {
+      throw 'Transfomer: unsupported generator function.';
+    }
+    visit(node.parameters);
+    if (node.body.isAsynchronous) {
+      node.body = new AsyncTransformer().visit(node.body);
+    } else {
+      visit(node.body);
+    }
+  }
 }
