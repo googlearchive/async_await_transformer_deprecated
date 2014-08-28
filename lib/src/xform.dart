@@ -194,6 +194,14 @@ class Analysis extends ast.GeneralizingAstVisitor<bool> {
     throw 'Analysis: unimplemented(${node.runtimeType})';
   }
 
+  bool visitAdjacentStrings(ast.AdjacentStrings node) {
+    var result = false;
+    for (var s in node.strings) {
+      if (visit(s)) result = true;
+    }
+    return maybeAdd(node, result);
+  }
+
   bool visitAsExpression(ast.AsExpression node) {
     return maybeAdd(node, visit(node.expression));
   }
@@ -1511,9 +1519,29 @@ class AsyncTransformer extends ast.AstVisitor {
   };
 
   // ---- StringLiterals ----
-  visitAdjacentStrings(ast.AdjacentStrings node) => unimplemented(node);
+  visitAdjacentStrings(ast.AdjacentStrings node) => (f, s) {
+    assert(node.strings.isNotEmpty);
+    // This code relies on translating a StringLiteral never passing a
+    // non-StringLiteral to its success continuation.
+    var strings = [];
+    var cont = (e) {
+      strings.add(e);
+      s(AstFactory.adjacentStrings(strings));
+    };
+    for (var i = node.strings.length - 1; i >= 1; --i) {
+      // Build the continuation for the i-1 string.
+      var nextCont = cont;
+      cont = (e) {
+        strings.add(e);
+        visit(node.strings[i])(f, nextCont);
+      };
+    }
+    return visit(node.strings.first)(f, cont);
+  };
 
   visitSimpleStringLiteral(ast.SimpleStringLiteral node) => (f, s) {
+    // The translation of adjacent strings relies on never passing a
+    // non-StringLiteral to the success continuation here.
     return s(node);
   };
 
@@ -1536,6 +1564,8 @@ class AsyncTransformer extends ast.AstVisitor {
           elements.add(element);
         }
       }
+      // The translation of adjacent strings relies on never passing a
+      // non-StringLiteral to the success continuation here.
       s(AstFactory.string(elements));
     });
   };
