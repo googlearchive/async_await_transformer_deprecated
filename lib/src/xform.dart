@@ -229,6 +229,14 @@ class Analysis extends ast.GeneralizingAstVisitor<bool> {
     return false;
   }
 
+  bool visitCascadeExpression(ast.CascadeExpression node) {
+    var result = visit(node.target);
+    for (var s in node.cascadeSections) {
+      if (visit(s)) result = true;
+    }
+    return maybeAdd(node, result);
+  }
+
   bool visitConditionalExpression(ast.ConditionalExpression node) {
     var result = visit(node.condition);
     if (visit(node.thenExpression)) result = true;
@@ -244,7 +252,7 @@ class Analysis extends ast.GeneralizingAstVisitor<bool> {
   }
 
   bool visitIndexExpression(ast.IndexExpression node) {
-    var result = visit(node.target);
+    var result = (node.target != null) && visit(node.target);
     return maybeAdd(node, visit(node.index) || result);
   }
 
@@ -315,7 +323,7 @@ class Analysis extends ast.GeneralizingAstVisitor<bool> {
   }
 
   bool visitPropertyAccess(ast.PropertyAccess node) {
-    return maybeAdd(node, visit(node.target));
+    return maybeAdd(node, node.target != null && visit(node.target));
   }
 
   bool visitSimpleStringLiteral(ast.SimpleStringLiteral node) {
@@ -1202,7 +1210,8 @@ class AsyncTransformer extends ast.AstVisitor {
             null,
             null,
             finallyName,
-            functionExpression([finallyContName, finallyValueName], finallyBlock)));
+            functionExpression([finallyContName, finallyValueName],
+                finallyBlock)));
 
     addStatement(
         AstFactory.functionDeclarationStatement(
@@ -1380,26 +1389,40 @@ class AsyncTransformer extends ast.AstVisitor {
       return finishAssignment(
           AstFactory.propertyAccess(target, lhs.identifier));
     } else if (lhs is ast.PropertyAccess) {
-      return visit(lhs.target)(f, (target) {
-        if (awaits.contains(node.rightHandSide)) {
-          target = addTempDeclaration(target);
-        }
+      if (lhs.target != null) {
+        return visit(lhs.target)(f, (target) {
+          if (awaits.contains(node.rightHandSide)) {
+            target = addTempDeclaration(target);
+          }
+          return finishAssignment(
+              AstFactory.propertyAccess(target, lhs.propertyName));
+        });
+      } else {
         return finishAssignment(
-            AstFactory.propertyAccess(target, lhs.propertyName));
-      });
+            AstFactory.propertyAccess(null, lhs.propertyName));
+      }
     } else if (lhs is ast.IndexExpression) {
-      return visit(lhs.target)(f, (target) {
-        if (awaits.contains(lhs.index) ||
-            awaits.contains(node.rightHandSide)) {
-          target = addTempDeclaration(target);
-        }
+      if (lhs.target != null) {
+        return visit(lhs.target)(f, (target) {
+          if (awaits.contains(lhs.index) ||
+              awaits.contains(node.rightHandSide)) {
+            target = addTempDeclaration(target);
+          }
+          return visit(lhs.index)(f, (index) {
+            if (awaits.contains(node.rightHandSide)) {
+              index = addTempDeclaration(index);
+            }
+            return finishAssignment(AstFactory.indexExpression(target, index));
+         });
+        });
+      } else {
         return visit(lhs.index)(f, (index) {
           if (awaits.contains(node.rightHandSide)) {
             index = addTempDeclaration(index);
           }
-          return finishAssignment(AstFactory.indexExpression(target, index));
+          return finishAssignment(AstFactory.indexExpression(null, index));
         });
-      });
+      }
     } else {
       throw  'Unexpected ${lhs.runtimeType} in assignment: $lhs';
     }
@@ -1469,9 +1492,49 @@ class AsyncTransformer extends ast.AstVisitor {
     }
   };
 
-  visitCascadeExpression(ast.CascadeExpression node) => unimplemented(node);
+  ast.Expression _asCascadeSection(ast.Expression node) {
+    if (node is ast.IndexExpression) {
+      return AstFactory.cascadedIndexExpression(node.index);
+    } else if (node is ast.MethodInvocation) {
+      return AstFactory.cascadedMethodInvocation(node.methodName.name,
+          node.argumentList.arguments);
+    } else if (node is ast.PropertyAccess) {
+      return AstFactory.cascadedPropertyAccess(node.propertyName.name);
+    } else if (node is ast.AssignmentExpression) {
+      return AstFactory.assignmentExpression(
+          _asCascadeSection(node.leftHandSide), node.operator.type,
+          node.rightHandSide);
+    }
+  }
 
-  visitConditionalExpression(ast.ConditionalExpression node) => (f,s) {
+  visitCascadeExpression(ast.CascadeExpression node) => (f, s) {
+    visit(node.target)(f, (target) {
+      if (node.cascadeSections.any(awaits.contains)) {
+        target = addTempDeclaration(target);
+      }
+      var sections = [];
+      var cont = (e) {
+        sections.add(_asCascadeSection(e));
+        s(AstFactory.cascadeExpression(target, sections));
+      };
+      for (var i = node.cascadeSections.length - 1; i >= 1; --i) {
+        var nextCont = cont;
+        // The continuation for the i-1 cascade section.
+        cont = (e) {
+          sections.add(_asCascadeSection(e));
+          var nextSection = node.cascadeSections[i];
+          if (awaits.contains(nextSection) && sections.isNotEmpty) {
+            addStatement(AstFactory.cascadeExpression(target, sections));
+            sections.clear();
+          }
+          visit(nextSection)(f, nextCont);
+        };
+      }
+      return visit(node.cascadeSections.first)(f, cont);
+    });
+  };
+
+  visitConditionalExpression(ast.ConditionalExpression node) => (f, s) {
     return visit(node.condition)(f, (expr) {
       var joinName = newName('join');
       addStatement(
@@ -1517,11 +1580,11 @@ class AsyncTransformer extends ast.AstVisitor {
   };
 
   visitIndexExpression(ast.IndexExpression node) => (f, s) {
-    visit(node.target)(f, (e0) {
+    return visit(node.target)(f, (e0) {
       if (awaits.contains(node.index)) {
         e0 = addTempDeclaration(e0);
       }
-      visit(node.index)(f, (e1) {
+      return visit(node.index)(f, (e1) {
         s(AstFactory.indexExpression(e0, e1));
       });
     });
