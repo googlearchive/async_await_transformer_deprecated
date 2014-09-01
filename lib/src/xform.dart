@@ -7,6 +7,8 @@ import 'package:analyzer/src/generated/testing/token_factory.dart';
 
 class Analysis extends ast.GeneralizingAstVisitor<bool> {
   Set<ast.AstNode> awaits = new Set<ast.AstNode>();
+  Map<ast.Statement, List<ast.Label>> labels =
+      <ast.Statement, List<ast.Label>>{};
   Set<String> names = new Set<String>();
 
   bool maybeAdd(ast.AstNode node, bool shouldAdd) {
@@ -125,6 +127,7 @@ class Analysis extends ast.GeneralizingAstVisitor<bool> {
   }
 
   bool visitLabeledStatement(ast.LabeledStatement node) {
+    labels[node.statement] = node.labels;
     return maybeAdd(node, visit(node.statement));
   }
 
@@ -422,6 +425,7 @@ ast.MethodInvocation methodInvocation(receiver,
 
 class AsyncTransformer extends ast.AstVisitor {
   Set<ast.AstNode> awaits;
+  Map<ast.Statement, List<ast.Label>> labels;
   Set<String> names;
 
   ast.Block currentBlock;
@@ -429,6 +433,7 @@ class AsyncTransformer extends ast.AstVisitor {
   List<String> breakLabels;
 
   List<ast.Expression> continueTargets;
+  List<String> continueLabels;
 
   visit(ast.AstNode node) => node.accept(this);
 
@@ -449,7 +454,9 @@ class AsyncTransformer extends ast.AstVisitor {
     breakTargets = <ast.Expression>[];
     breakLabels = <String>[];
     continueTargets = <ast.Expression>[];
+    continueLabels = <String>[];
     awaits = analysis.awaits;
+    labels = analysis.labels;
     names = analysis.names;
   }
 
@@ -664,28 +671,53 @@ class AsyncTransformer extends ast.AstVisitor {
     return _translateStatementList(node.statements, f, r, s);
   };
 
-  visitBreakStatement(ast.BreakStatement node) => (f, r, s) {
-    var target;
-
-    if (node.label != null) {
-      for (var i = breakLabels.length - 1; i >= 0; i--) {
-        if(breakLabels[i] == node.label.name) {
-          target = breakTargets[i];
-          break;
-        }
-      }
-    } else {
-      target = breakTargets.last;
+  ast.Expression _findJumpTarget(node, List<ast.Expression> targets,
+                                 List<String> names) {
+    if (node.label == null) {
+      return targets.last;
     }
+    for (var i = targets.length - 1; i >= 0; --i) {
+      if (names[i] == node.label.name) return targets[i];
+    }
+    return unreachable(node);
+  }
+
+  visitBreakStatement(ast.BreakStatement node) => (f, r, s) {
+    var target = _findJumpTarget(node, breakTargets, breakLabels);
     addStatement(AstFactory.functionExpressionInvocation(
         target, [nullLiteral()]));
   };
 
   visitContinueStatement(ast.ContinueStatement node) => (f, r, s) {
-    if (node.label != null) unimplemented(node);
+    var target = _findJumpTarget(node, continueTargets, continueLabels);
     addStatement(AstFactory.functionExpressionInvocation(
-            continueTargets.last, [nullLiteral()]));
+        target, [nullLiteral()]));
   };
+
+  _addJumpTargets(ast.AstNode node, String name, List<ast.Expression> targets,
+                  List<String> names) {
+    if (labels[node] == null) {
+      targets.add(identifier(name));
+      names.add(null);
+    } else {
+      for (var label in labels[node]) {
+        targets.add(identifier(name));
+        names.add(label.label.name);
+      }
+    }
+  }
+
+  _removeJumpTargets(ast.AstNode node, List<ast.Expression> targets,
+                     List<String> names) {
+    if (labels[node] == null) {
+      targets.removeLast();
+      names.removeLast();
+    } else {
+      var delta = labels[node].length;
+      targets.length -= delta;
+      names.length -= delta;
+    }
+  }
 
   visitDoStatement(ast.DoStatement node) => (f, r, s) {
     var breakName = newName('break');
@@ -715,17 +747,15 @@ class AsyncTransformer extends ast.AstVisitor {
     addStatement(
         AstFactory.functionDeclarationStatement(null, null, continueName,
             functionExpression([newName('x')], continueBlock)));
-    breakTargets.add(identifier(breakName));
-    breakLabels.add(null);
-    continueTargets.add(identifier(continueName));
+    _addJumpTargets(node, breakName, breakTargets, breakLabels);
+    _addJumpTargets(node, continueName, continueTargets, continueLabels);
     visit(node.body)(f, r, () {
       addStatement(
           AstFactory.functionExpressionInvocation(
               identifier(continueName), [nullLiteral()]));
     });
-    breakTargets.removeLast();
-    breakLabels.removeLast();
-    continueTargets.removeLast();
+    _removeJumpTargets(node, breakTargets, breakLabels);
+    _removeJumpTargets(node, continueTargets, continueLabels);
 
     currentBlock = savedBlock;
     addStatement(
@@ -862,17 +892,15 @@ class AsyncTransformer extends ast.AstVisitor {
     }
 
     var bodyBlock = currentBlock = emptyBlock();
-    breakTargets.add(identifier(breakName));
-    breakLabels.add(null);
-    continueTargets.add(identifier(continueName));
+    _addJumpTargets(node, breakName, breakTargets, breakLabels);
+    _addJumpTargets(node, continueName, continueTargets, continueLabels);
     visit(node.body)(f, r, () {
       addStatement(
           AstFactory.functionExpressionInvocation(
               identifier(continueName), [nullLiteral()]));
     });
-    breakTargets.removeLast();
-    breakLabels.removeLast();
-    continueTargets.removeLast();
+    _removeJumpTargets(node, breakTargets, breakLabels);
+    _removeJumpTargets(node, continueTargets, continueLabels);
 
     var loopBlock = currentBlock = emptyBlock();
     addStatement(
@@ -951,37 +979,41 @@ class AsyncTransformer extends ast.AstVisitor {
     });
   };
 
-  visitLabeledStatement(ast.LabeledStatement node) => (f,r,s) {
-    // if loop recurse immediately
+  bool _isLoop(ast.AstNode node) {
+    return node is ast.DoStatement ||
+        node is ast.ForEachStatement ||
+        node is ast.ForStatement ||
+        node is ast.WhileStatement;
+  }
 
-    var breakName = newName('break');
-    var savedBlock = currentBlock;
-    var breakBlock = currentBlock = emptyBlock();
-    s();
-    currentBlock = savedBlock;
-
-    addStatement(
-        AstFactory.functionDeclarationStatement(
-          null,
-          null,
-          breakName,
-          functionExpression([newName('x')], breakBlock)));
-
-    for(var label in node.labels) {
-      breakLabels.add(label.label.name);
-      breakTargets.add(identifier(breakName));
+  visitLabeledStatement(ast.LabeledStatement node) {
+    var stmt = node.statement;
+    if (_isLoop(stmt) || stmt is ast.SwitchStatement) {
+      return visit(stmt);
     }
+    return (f, r, s) {
+      var breakName = newName('break');
+      var savedBlock = currentBlock;
+      var breakBlock = currentBlock = emptyBlock();
+      s();
+      currentBlock = savedBlock;
 
-    visit(node.statement) (f,r, () {
       addStatement(
-        AstFactory.functionExpressionInvocation(
-            identifier(breakName), [nullLiteral()]));
-    });
+          AstFactory.functionDeclarationStatement(
+            null,
+            null,
+            breakName,
+            functionExpression([newName('x')], breakBlock)));
 
-    var delta = node.labels.length;
-    breakLabels.length -= delta; breakTargets.length -= delta;
-
-  };
+      _addJumpTargets(stmt, breakName, breakTargets, breakLabels);
+      visit(stmt)(f, r, () {
+        addStatement(
+          AstFactory.functionExpressionInvocation(
+              identifier(breakName), [nullLiteral()]));
+      });
+      _removeJumpTargets(stmt, breakTargets, breakLabels);
+    };
+  }
 
   visitRethrowExpression(ast.RethrowExpression node) => unimplemented(node);
 
@@ -1003,14 +1035,20 @@ class AsyncTransformer extends ast.AstVisitor {
 
       // Generate a name per labeled case.
       var continueNames = [];
+      var savedLength = continueTargets.length;
       for (var member in node.members) {
-        if (member.labels.isNotEmpty) continueNames.add(newName('continue'));
+        var labels = member.labels;
+        if (labels.isNotEmpty) {
+          var continueName = newName('continue');
+          continueNames.add(continueName);
+          continueTargets.addAll(labels.map((_) => identifier(continueName)));
+          continueLabels.addAll(labels.map((lbl) => lbl.label.name));
+        }
       }
 
       // Translate the cases with bindings for the break and possible
       // continues.
-      breakTargets.add(identifier(breakName));
-      continueTargets.addAll(continueNames.map(identifier));
+      _addJumpTargets(node, breakName, breakTargets, breakLabels);
       if (continueNames.isNotEmpty) {
         // Add declarations for mutable continue functions.
         addStatement(
@@ -1062,8 +1100,9 @@ class AsyncTransformer extends ast.AstVisitor {
               bodyBlock.statements));
         }
       }
-      breakTargets.removeLast();
-      continueTargets.length -= continueNames.length;
+      _removeJumpTargets(node, breakTargets, breakLabels);
+      continueTargets.length = savedLength;
+      continueTargets.length = savedLength;
       currentBlock = savedBlock;
       addStatement(AstFactory.switchStatement(expr, members));
     });
@@ -1229,7 +1268,6 @@ class AsyncTransformer extends ast.AstVisitor {
   };
 
   visitWhileStatement(ast.WhileStatement node) => (f, r, s) {
-
     var breakName = newName('break');
     var continueName = newName('continue');
 
@@ -1242,23 +1280,17 @@ class AsyncTransformer extends ast.AstVisitor {
       var savedBlock = currentBlock;
       var bodyBlock = currentBlock = emptyBlock();
 
-      breakTargets.add(identifier(breakName));
-      breakLabels.add(null);
-
-      continueTargets.add(identifier(continueName));
-
+      _addJumpTargets(node, breakName, breakTargets, breakLabels);
+      _addJumpTargets(node, continueName, continueTargets, continueLabels);
       visit(node.body)(f, r, () {
         addStatement(
             AstFactory.functionExpressionInvocation(
               identifier(continueName), [nullLiteral()]));
       });
-
-      breakTargets.removeLast();
-      breakLabels.removeLast();
-
-      continueTargets.removeLast();
-
+      _removeJumpTargets(node, breakTargets, breakLabels);
+      _removeJumpTargets(node, continueTargets, continueLabels);
       currentBlock = savedBlock;
+
       addStatement(AstFactory.ifStatement2(
         expr,
         // Trampoline the body via Future.wait.
