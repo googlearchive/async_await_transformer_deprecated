@@ -229,6 +229,14 @@ class Analysis extends ast.GeneralizingAstVisitor<bool> {
     return false;
   }
 
+  bool visitCascadeExpression(ast.CascadeExpression node) {
+    var result = visit(node.target);
+    for (var s in node.cascadeSections) {
+      if (visit(s)) result = true;
+    }
+    return maybeAdd(node, result);
+  }
+
   bool visitConditionalExpression(ast.ConditionalExpression node) {
     var result = visit(node.condition);
     if (visit(node.thenExpression)) result = true;
@@ -244,7 +252,7 @@ class Analysis extends ast.GeneralizingAstVisitor<bool> {
   }
 
   bool visitIndexExpression(ast.IndexExpression node) {
-    var result = visit(node.target);
+    var result = (node.target != null) && visit(node.target);
     return maybeAdd(node, visit(node.index) || result);
   }
 
@@ -315,7 +323,7 @@ class Analysis extends ast.GeneralizingAstVisitor<bool> {
   }
 
   bool visitPropertyAccess(ast.PropertyAccess node) {
-    return maybeAdd(node, visit(node.target));
+    return maybeAdd(node, node.target != null && visit(node.target));
   }
 
   bool visitSimpleStringLiteral(ast.SimpleStringLiteral node) {
@@ -483,7 +491,7 @@ class AsyncTransformer extends ast.AstVisitor {
     }
   }
 
-  ast.FunctionExpression reifyExpressionCont(s, f) {
+  ast.FunctionExpression reifyThenCallback(s, f) {
     var savedBlock = currentBlock;
     var exnBlock = currentBlock = emptyBlock();
     var exnName = newName('e');
@@ -503,10 +511,10 @@ class AsyncTransformer extends ast.AstVisitor {
     return fun;
   }
 
-  ast.FunctionExpression reifyErrorCont(f) {
+  ast.FunctionExpression reifyExpressionCont(f, name) {
     var savedBlock = currentBlock;
     currentBlock = emptyBlock();
-    String name = newName('e');
+    String name = newName(name);
     f(identifier(name));
     var fun = functionExpression([name], currentBlock);
     currentBlock = savedBlock;
@@ -1160,10 +1168,12 @@ class AsyncTransformer extends ast.AstVisitor {
       assert(node.catchClauses.length == 1);
       visit(node.catchClauses.first)((e) {
         addStatement(
-            AstFactory.methodInvocation2(finallyName, [reifyErrorCont(f), e]));
+            AstFactory.methodInvocation2(finallyName,
+                [reifyExpressionCont(f, 'e'), e]));
       }, (v) {
         addStatement(
-            AstFactory.methodInvocation2(finallyName, [reifyErrorCont(r), v]));
+            AstFactory.methodInvocation2(finallyName,
+                [reifyExpressionCont(r, 'v'), v]));
       }, () {
         addStatement(
             AstFactory.methodInvocation2(
@@ -1182,7 +1192,8 @@ class AsyncTransformer extends ast.AstVisitor {
       addStatement(AstFactory.methodInvocation2(catchName, [e]));
     }, (v) {
       addStatement(
-          AstFactory.methodInvocation2(finallyName, [reifyErrorCont(r), v]));
+          AstFactory.methodInvocation2(finallyName,
+              [reifyExpressionCont(r, 'v'), v]));
     }, () {
       addStatement(
           AstFactory.expressionStatement(
@@ -1199,7 +1210,8 @@ class AsyncTransformer extends ast.AstVisitor {
             null,
             null,
             finallyName,
-            functionExpression([finallyContName, finallyValueName], finallyBlock)));
+            functionExpression([finallyContName, finallyValueName],
+                finallyBlock)));
 
     addStatement(
         AstFactory.functionDeclarationStatement(
@@ -1377,26 +1389,40 @@ class AsyncTransformer extends ast.AstVisitor {
       return finishAssignment(
           AstFactory.propertyAccess(target, lhs.identifier));
     } else if (lhs is ast.PropertyAccess) {
-      return visit(lhs.target)(f, (target) {
-        if (awaits.contains(node.rightHandSide)) {
-          target = addTempDeclaration(target);
-        }
+      if (lhs.target != null) {
+        return visit(lhs.target)(f, (target) {
+          if (awaits.contains(node.rightHandSide)) {
+            target = addTempDeclaration(target);
+          }
+          return finishAssignment(
+              AstFactory.propertyAccess(target, lhs.propertyName));
+        });
+      } else {
         return finishAssignment(
-            AstFactory.propertyAccess(target, lhs.propertyName));
-      });
+            AstFactory.propertyAccess(null, lhs.propertyName));
+      }
     } else if (lhs is ast.IndexExpression) {
-      return visit(lhs.target)(f, (target) {
-        if (awaits.contains(lhs.index) ||
-            awaits.contains(node.rightHandSide)) {
-          target = addTempDeclaration(target);
-        }
+      if (lhs.target != null) {
+        return visit(lhs.target)(f, (target) {
+          if (awaits.contains(lhs.index) ||
+              awaits.contains(node.rightHandSide)) {
+            target = addTempDeclaration(target);
+          }
+          return visit(lhs.index)(f, (index) {
+            if (awaits.contains(node.rightHandSide)) {
+              index = addTempDeclaration(index);
+            }
+            return finishAssignment(AstFactory.indexExpression(target, index));
+         });
+        });
+      } else {
         return visit(lhs.index)(f, (index) {
           if (awaits.contains(node.rightHandSide)) {
             index = addTempDeclaration(index);
           }
-          return finishAssignment(AstFactory.indexExpression(target, index));
+          return finishAssignment(AstFactory.indexExpression(null, index));
         });
-      });
+      }
     } else {
       throw  'Unexpected ${lhs.runtimeType} in assignment: $lhs';
     }
@@ -1408,32 +1434,112 @@ class AsyncTransformer extends ast.AstVisitor {
           AstFactory.methodInvocation(
               expr,
               'then',
-              [reifyExpressionCont(s, f),
-                AstFactory.namedExpression2('onError', reifyErrorCont(f))]));
+              [reifyThenCallback(s, f),
+                AstFactory.namedExpression2('onError',
+                    reifyExpressionCont(f, 'e'))]));
     });
   };
 
   visitBinaryExpression(ast.BinaryExpression node) => (f, s) {
-    // TODO: Is this even possible?
-    assert(node.operator.lexeme != '||' && node.operator.lexeme != '&&');
-    return visit(node.leftOperand)(f, (left) {
+    if (node.operator.lexeme == '&&' || node.operator.lexeme == '||') {
       if (awaits.contains(node.rightOperand)) {
-        left = addTempDeclaration(left);
+        var joinName = newName('join');
+        addStatement(AstFactory.functionDeclarationStatement(null,  null,
+            joinName, reifyExpressionCont(s, 'x')));
+        visit(node.leftOperand)(f, (left) {
+          var savedBlock = currentBlock;
+          var rightBlock = currentBlock = emptyBlock();
+          visit(node.rightOperand)(f, (right) {
+            addStatement(AstFactory.functionExpressionInvocation(
+                identifier(joinName), [
+                    AstFactory.conditionalExpression(right,
+                        AstFactory.booleanLiteral(true),
+                        AstFactory.booleanLiteral(false))]));
+          });
+          currentBlock = savedBlock;
+          if (node.operator.lexeme == '&&') {
+            addStatement(AstFactory.ifStatement2(
+                left,
+                rightBlock,
+                block([AstFactory.functionExpressionInvocation(
+                    identifier(joinName),
+                    [AstFactory.booleanLiteral(false)])])));
+          } else {
+            addStatement(AstFactory.ifStatement2(
+                left,
+                block([AstFactory.functionExpressionInvocation(
+                    identifier(joinName),
+                    [AstFactory.booleanLiteral(true)])]),
+                rightBlock));
+          }
+        });
+      } else {
+        visit(node.leftOperand)(f, (left) {
+          visit(node.rightOperand)(f, (right) {
+            s(AstFactory.binaryExpression(left, node.operator.type, right));
+          });
+        });
       }
-      return visit(node.rightOperand)(f, (right) {
-        s(AstFactory.binaryExpression(left, node.operator.type, right));
+    } else {
+      return visit(node.leftOperand)(f, (left) {
+        if (awaits.contains(node.rightOperand)) {
+          left = addTempDeclaration(left);
+        }
+       return visit(node.rightOperand)(f, (right) {
+          s(AstFactory.binaryExpression(left, node.operator.type, right));
+        });
       });
+    }
+  };
+
+  ast.Expression _asCascadeSection(ast.Expression node) {
+    if (node is ast.IndexExpression) {
+      return AstFactory.cascadedIndexExpression(node.index);
+    } else if (node is ast.MethodInvocation) {
+      return AstFactory.cascadedMethodInvocation(node.methodName.name,
+          node.argumentList.arguments);
+    } else if (node is ast.PropertyAccess) {
+      return AstFactory.cascadedPropertyAccess(node.propertyName.name);
+    } else if (node is ast.AssignmentExpression) {
+      return AstFactory.assignmentExpression(
+          _asCascadeSection(node.leftHandSide), node.operator.type,
+          node.rightHandSide);
+    }
+  }
+
+  visitCascadeExpression(ast.CascadeExpression node) => (f, s) {
+    visit(node.target)(f, (target) {
+      if (node.cascadeSections.any(awaits.contains)) {
+        target = addTempDeclaration(target);
+      }
+      var sections = [];
+      var cont = (e) {
+        sections.add(_asCascadeSection(e));
+        s(AstFactory.cascadeExpression(target, sections));
+      };
+      for (var i = node.cascadeSections.length - 1; i >= 1; --i) {
+        var nextCont = cont;
+        // The continuation for the i-1 cascade section.
+        cont = (e) {
+          sections.add(_asCascadeSection(e));
+          var nextSection = node.cascadeSections[i];
+          if (awaits.contains(nextSection) && sections.isNotEmpty) {
+            addStatement(AstFactory.cascadeExpression(target, sections));
+            sections.clear();
+          }
+          visit(nextSection)(f, nextCont);
+        };
+      }
+      return visit(node.cascadeSections.first)(f, cont);
     });
   };
 
-  visitCascadeExpression(ast.CascadeExpression node) => unimplemented(node);
-
-  visitConditionalExpression(ast.ConditionalExpression node) => (f,s) {
+  visitConditionalExpression(ast.ConditionalExpression node) => (f, s) {
     return visit(node.condition)(f, (expr) {
       var joinName = newName('join');
       addStatement(
           AstFactory.functionDeclarationStatement(
-              null, null, joinName, reifyErrorCont(s)));
+              null, null, joinName, reifyExpressionCont(s, 'x')));
       s = (r) {
         addStatement(AstFactory.methodInvocation2(joinName, [r]));
       };
@@ -1474,11 +1580,11 @@ class AsyncTransformer extends ast.AstVisitor {
   };
 
   visitIndexExpression(ast.IndexExpression node) => (f, s) {
-    visit(node.target)(f, (e0) {
+    return visit(node.target)(f, (e0) {
       if (awaits.contains(node.index)) {
         e0 = addTempDeclaration(e0);
       }
-      visit(node.index)(f, (e1) {
+      return visit(node.index)(f, (e1) {
         s(AstFactory.indexExpression(e0, e1));
       });
     });
