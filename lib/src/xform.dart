@@ -312,6 +312,10 @@ class Analysis extends ast.GeneralizingAstVisitor<bool> {
     return maybeAdd(node, visit(node.expression));
   }
 
+  bool visitPostfixExpression(ast.PostfixExpression node) {
+    return maybeAdd(node, visit(node.operand));
+  }
+
   bool visitPrefixedIdentifier(ast.PrefixedIdentifier node) {
     names.add(node.prefix.name);
     names.add(node.identifier.name);
@@ -1272,7 +1276,10 @@ class AsyncTransformer extends ast.AstVisitor {
 
   visitVariableDeclarationStatement(
       ast.VariableDeclarationStatement node) => (f, r, s) {
-    var keyword = scanner.Keyword.keywords[node.variables.keyword.lexeme];
+    // TODO(kmillikin): A null keyword indicates a type.  Do not discard it!
+    var keyword = node.variables.keyword == null
+        ? scanner.Keyword.VAR
+        : scanner.Keyword.keywords[node.variables.keyword.lexeme];
     return _translateDeclarationList(keyword, node.variables)(f, (decls) {
       _residualizeDeclarationList(keyword, decls);
       return s();
@@ -1505,6 +1512,7 @@ class AsyncTransformer extends ast.AstVisitor {
           _asCascadeSection(node.leftHandSide), node.operator.type,
           node.rightHandSide);
     }
+    return unreachable(node);
   }
 
   visitCascadeExpression(ast.CascadeExpression node) => (f, s) {
@@ -1762,7 +1770,11 @@ class AsyncTransformer extends ast.AstVisitor {
     return visit(node.expression)(f, s);
   };
 
-  visitPostfixExpression(ast.PostfixExpression node) => unimplemented(node);
+  visitPostfixExpression(ast.PostfixExpression node) => (f, s) {
+    return visit(node.operand)(f, (expr) {
+      return s(AstFactory.postfixExpression(expr, node.operator.type));
+    });
+  };
 
   visitPrefixExpression(ast.PrefixExpression node) => (f, s) {
     return visit(node.operand)(f, (expr) {
