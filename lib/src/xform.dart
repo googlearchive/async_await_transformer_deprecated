@@ -483,7 +483,7 @@ class AsyncTransformer extends ast.AstVisitor {
     }
   }
 
-  ast.FunctionExpression reifyExpressionCont(s, f) {
+  ast.FunctionExpression reifyThenCallback(s, f) {
     var savedBlock = currentBlock;
     var exnBlock = currentBlock = emptyBlock();
     var exnName = newName('e');
@@ -503,10 +503,10 @@ class AsyncTransformer extends ast.AstVisitor {
     return fun;
   }
 
-  ast.FunctionExpression reifyErrorCont(f) {
+  ast.FunctionExpression reifyExpressionCont(f, name) {
     var savedBlock = currentBlock;
     currentBlock = emptyBlock();
-    String name = newName('e');
+    String name = newName(name);
     f(identifier(name));
     var fun = functionExpression([name], currentBlock);
     currentBlock = savedBlock;
@@ -1160,10 +1160,12 @@ class AsyncTransformer extends ast.AstVisitor {
       assert(node.catchClauses.length == 1);
       visit(node.catchClauses.first)((e) {
         addStatement(
-            AstFactory.methodInvocation2(finallyName, [reifyErrorCont(f), e]));
+            AstFactory.methodInvocation2(finallyName,
+                [reifyExpressionCont(f, 'e'), e]));
       }, (v) {
         addStatement(
-            AstFactory.methodInvocation2(finallyName, [reifyErrorCont(r), v]));
+            AstFactory.methodInvocation2(finallyName,
+                [reifyExpressionCont(r, 'v'), v]));
       }, () {
         addStatement(
             AstFactory.methodInvocation2(
@@ -1182,7 +1184,8 @@ class AsyncTransformer extends ast.AstVisitor {
       addStatement(AstFactory.methodInvocation2(catchName, [e]));
     }, (v) {
       addStatement(
-          AstFactory.methodInvocation2(finallyName, [reifyErrorCont(r), v]));
+          AstFactory.methodInvocation2(finallyName,
+              [reifyExpressionCont(r, 'v'), v]));
     }, () {
       addStatement(
           AstFactory.expressionStatement(
@@ -1408,22 +1411,62 @@ class AsyncTransformer extends ast.AstVisitor {
           AstFactory.methodInvocation(
               expr,
               'then',
-              [reifyExpressionCont(s, f),
-                AstFactory.namedExpression2('onError', reifyErrorCont(f))]));
+              [reifyThenCallback(s, f),
+                AstFactory.namedExpression2('onError',
+                    reifyExpressionCont(f, 'e'))]));
     });
   };
 
   visitBinaryExpression(ast.BinaryExpression node) => (f, s) {
-    // TODO: Is this even possible?
-    assert(node.operator.lexeme != '||' && node.operator.lexeme != '&&');
-    return visit(node.leftOperand)(f, (left) {
+    if (node.operator.lexeme == '&&' || node.operator.lexeme == '||') {
       if (awaits.contains(node.rightOperand)) {
-        left = addTempDeclaration(left);
+        var joinName = newName('join');
+        addStatement(AstFactory.functionDeclarationStatement(null,  null,
+            joinName, reifyExpressionCont(s, 'x')));
+        visit(node.leftOperand)(f, (left) {
+          var savedBlock = currentBlock;
+          var rightBlock = currentBlock = emptyBlock();
+          visit(node.rightOperand)(f, (right) {
+            addStatement(AstFactory.functionExpressionInvocation(
+                identifier(joinName), [
+                    AstFactory.conditionalExpression(right,
+                        AstFactory.booleanLiteral(true),
+                        AstFactory.booleanLiteral(false))]));
+          });
+          currentBlock = savedBlock;
+          if (node.operator.lexeme == '&&') {
+            addStatement(AstFactory.ifStatement2(
+                left,
+                rightBlock,
+                block([AstFactory.functionExpressionInvocation(
+                    identifier(joinName),
+                    [AstFactory.booleanLiteral(false)])])));
+          } else {
+            addStatement(AstFactory.ifStatement2(
+                left,
+                block([AstFactory.functionExpressionInvocation(
+                    identifier(joinName),
+                    [AstFactory.booleanLiteral(true)])]),
+                rightBlock));
+          }
+        });
+      } else {
+        visit(node.leftOperand)(f, (left) {
+          visit(node.rightOperand)(f, (right) {
+            s(AstFactory.binaryExpression(left, node.operator.type, right));
+          });
+        });
       }
-      return visit(node.rightOperand)(f, (right) {
-        s(AstFactory.binaryExpression(left, node.operator.type, right));
+    } else {
+      return visit(node.leftOperand)(f, (left) {
+        if (awaits.contains(node.rightOperand)) {
+          left = addTempDeclaration(left);
+        }
+       return visit(node.rightOperand)(f, (right) {
+          s(AstFactory.binaryExpression(left, node.operator.type, right));
+        });
       });
-    });
+    }
   };
 
   visitCascadeExpression(ast.CascadeExpression node) => unimplemented(node);
@@ -1433,7 +1476,7 @@ class AsyncTransformer extends ast.AstVisitor {
       var joinName = newName('join');
       addStatement(
           AstFactory.functionDeclarationStatement(
-              null, null, joinName, reifyErrorCont(s)));
+              null, null, joinName, reifyExpressionCont(s, 'x')));
       s = (r) {
         addStatement(AstFactory.methodInvocation2(joinName, [r]));
       };
