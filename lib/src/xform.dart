@@ -515,10 +515,10 @@ class AsyncTransformer extends ast.AstVisitor {
     return fun;
   }
 
-  ast.FunctionExpression reifyExpressionCont(f, name) {
+  ast.FunctionExpression reifyExpressionCont(f, baseName) {
     var savedBlock = currentBlock;
     currentBlock = emptyBlock();
-    String name = newName(name);
+    String name = newName(baseName);
     f(identifier(name));
     var fun = functionExpression([name], currentBlock);
     currentBlock = savedBlock;
