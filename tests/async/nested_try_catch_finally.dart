@@ -28,11 +28,11 @@ f() async {
     }
   } finally {
     try {
-      await S(6, throws: true);
-    } catch(e) { 
       await S(7, throws: true);
+    } catch(e) { 
+      await S(8, throws: true);
     } finally {
-      await S(8);
+      await S(9);
     }
   }
 }

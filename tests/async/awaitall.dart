@@ -1,18 +1,16 @@
 main() async {
   var tasks = [
-      constant_async(1),
-      constant_async(2),
-      constant_async(3)
+      constant(1),
+      constant(2),
+      constant(3)
   ];
   await awaitall(tasks);
 }
 
-constant(x) async {
- return x; 
-}
+constant(x) async => x;
 
 awaitall(tasks) async {
-   for (var task in tasks) {
-      await(task);
-   }
+  for (var task in tasks) {
+    await task;
+  }
 }
