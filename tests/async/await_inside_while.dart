@@ -13,15 +13,15 @@ f() async {
   }
 }
 
-var read = 10;
+var input = 10;
 
-readAsync() {
+read() async {
   await delay(2000); 
-  print(read);
-  return read--; 
+  print(input);
+  return input--; 
 }
 
-writeAsync(n) {
+write(n) async {
   print(n);
   await delay(2000);
   return;

@@ -12,5 +12,5 @@ main() async {
 }
 
 f() {
-  throw “boom”;
+  throw 'boom';
 }
