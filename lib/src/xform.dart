@@ -492,21 +492,6 @@ class AsyncTransformer extends ast.AstVisitor {
     }
   }
 
-  ast.FunctionExpression reifyThenCallback(s, f) {
-    var savedBlock = currentBlock;
-    var exnBlock = currentBlock = emptyBlock();
-    var exnName = newName('e');
-    f(identifier(exnName));
-
-    currentBlock = emptyBlock();
-    var name = newName('x');
-    s(identifier(name));
-
-    var fun = functionExpression([name], currentBlock);
-    currentBlock = savedBlock;
-    return fun;
-  }
-
   ast.FunctionExpression reifyExpressionCont(f, baseName) {
     var savedBlock = currentBlock;
     var bodyBlock = currentBlock = emptyBlock();
@@ -618,9 +603,7 @@ class AsyncTransformer extends ast.AstVisitor {
     analysis.visit(node.block);
     reset(analysis);
 
-    visit(node.block)((e) {
-      addStatement(AstFactory.throwExpression2(e));
-    }, (v) {
+    visit(node.block)((v) {
       addStatement(AstFactory.returnStatement2(v));
     }, () {
       addStatement(AstFactory.returnStatement2(nullLiteral()));
@@ -653,23 +636,23 @@ class AsyncTransformer extends ast.AstVisitor {
   // ---- Statements ----
   unimplemented(ast.AstNode node) => throw 'Unimplemented(${node.runtimeType})';
 
-  visitAssertStatement(ast.AssertStatement node) => (f, r, s) {
-    return visit(node.condition)(f, (cond) {
+  visitAssertStatement(ast.AssertStatement node) => (r, s) {
+    return visit(node.condition)((cond) {
       addStatement(AstFactory.assertStatement(cond));
       return s();
     });
   };
 
-  _translateStatementList(ast.NodeList<ast.Statement> list, f, r, s) {
+  _translateStatementList(ast.NodeList<ast.Statement> list, r, s) {
     for (var stmt in list.reversed) {
       var nextCont = s;
-      s = () => visit(stmt)(f, r, nextCont);
+      s = () => visit(stmt)(r, nextCont);
     }
     return s();
   }
 
-  visitBlock(ast.Block node) => (f, r, s) {
-    return _translateStatementList(node.statements, f, r, s);
+  visitBlock(ast.Block node) => (r, s) {
+    return _translateStatementList(node.statements, r, s);
   };
 
   ast.Expression _findJumpTarget(node, List<ast.Expression> targets,
@@ -683,12 +666,12 @@ class AsyncTransformer extends ast.AstVisitor {
     throw 'Illegal ${node.runtimeType}: $node';
   }
 
-  visitBreakStatement(ast.BreakStatement node) => (f, r, s) {
+  visitBreakStatement(ast.BreakStatement node) => (r, s) {
     var target = _findJumpTarget(node, breakTargets, breakLabels);
     addStatement(AstFactory.returnStatement2(target));
   };
 
-  visitContinueStatement(ast.ContinueStatement node) => (f, r, s) {
+  visitContinueStatement(ast.ContinueStatement node) => (r, s) {
     var target = _findJumpTarget(node, continueTargets, continueLabels);
     addStatement(AstFactory.returnStatement2(target));
   };
@@ -720,7 +703,7 @@ class AsyncTransformer extends ast.AstVisitor {
     }
   }
 
-  visitDoStatement(ast.DoStatement node) => (f, r, s) {
+  visitDoStatement(ast.DoStatement node) => (r, s) {
     var breakName = newName('break');
     var continueName = newName('continue');
     var loopName = newName('loop');
@@ -730,7 +713,7 @@ class AsyncTransformer extends ast.AstVisitor {
     s();
 
     var continueBlock = currentBlock = emptyBlock();
-    visit(node.condition)(f, (expr) {
+    visit(node.condition)((expr) {
       addStatement(AstFactory.ifStatement2(
           expr,
           block([AstFactory.returnStatement2(AstFactory.methodInvocation(
@@ -753,7 +736,7 @@ class AsyncTransformer extends ast.AstVisitor {
             functionExpression([], continueBlock)));
     _addJumpTargets(node, breakName, breakTargets, breakLabels);
     _addJumpTargets(node, continueName, continueTargets, continueLabels);
-    visit(node.body)(f, r, () {
+    visit(node.body)(r, () {
       addStatement(AstFactory.returnStatement2(
           AstFactory.functionExpressionInvocation(
               identifier(continueName), [])));
@@ -773,12 +756,12 @@ class AsyncTransformer extends ast.AstVisitor {
             identifier(loopName), [])));
   };
 
-  visitEmptyStatement(ast.EmptyStatement node) => (f, r, s) {
+  visitEmptyStatement(ast.EmptyStatement node) => (r, s) {
     return s();
   };
 
-  visitExpressionStatement(ast.ExpressionStatement node) => (f, r, s) {
-    return visit(node.expression)(f, (expr) {
+  visitExpressionStatement(ast.ExpressionStatement node) => (r, s) {
+    return visit(node.expression)((expr) {
       addStatement(expr);
       return s();
     });
@@ -816,12 +799,12 @@ class AsyncTransformer extends ast.AstVisitor {
     return visitBlock(stmt);
   }
 
-  _translateForUpdaters(List<ast.Expression> exprs, f, s) {
+  _translateForUpdaters(List<ast.Expression> exprs, s) {
     var cont = s;
     for (var expr in exprs.reversed) {
       var nextCont = cont;
       cont = () {
-        visit(expr)(f, (expr) {
+        visit(expr)((expr) {
           addStatement(expr);
           return nextCont();
         });
@@ -830,7 +813,7 @@ class AsyncTransformer extends ast.AstVisitor {
      return cont();
    }
 
-  _translateForDeclarations(List<ast.VariableDeclaration> decls, f, s) {
+  _translateForDeclarations(List<ast.VariableDeclaration> decls, s) {
     var exprs = [];
     var seenAwait = false;
     var cont = (e) {
@@ -850,16 +833,16 @@ class AsyncTransformer extends ast.AstVisitor {
         exprs.add(e);
         return (nextExpr == null)
             ? nextCont(nullLiteral())
-            : visit(nextExpr)(f, nextCont);
+            : visit(nextExpr)(nextCont);
       };
     }
     var expr = decls.first.initializer;
     return (expr == null)
         ? cont(nullLiteral())
-        :  visit(expr)(f, cont);
+        :  visit(expr)(cont);
   }
 
- visitForStatement(ast.ForStatement node) => (f, r, s) {
+ visitForStatement(ast.ForStatement node) => (r, s) {
     var breakName = newName('break');
     var continueName = newName('continue');
     var loopName = newName('loop');
@@ -890,7 +873,7 @@ class AsyncTransformer extends ast.AstVisitor {
                       parameters))])));
     }
     if (node.updaters != null) {
-      _translateForUpdaters(node.updaters, f, trampoline);
+      _translateForUpdaters(node.updaters, trampoline);
     } else {
       trampoline();
     }
@@ -898,7 +881,7 @@ class AsyncTransformer extends ast.AstVisitor {
     var bodyBlock = currentBlock = emptyBlock();
     _addJumpTargets(node, breakName, breakTargets, breakLabels);
     _addJumpTargets(node, continueName, continueTargets, continueLabels);
-    visit(node.body)(f, r, () {
+    visit(node.body)(r, () {
       addStatement(AstFactory.returnStatement2(
           AstFactory.functionExpressionInvocation(
               identifier(continueName), [])));
@@ -911,7 +894,7 @@ class AsyncTransformer extends ast.AstVisitor {
         AstFactory.functionDeclarationStatement(null, null, continueName,
             functionExpression([], continueBlock)));
     if (node.condition != null) {
-      visit(node.condition)(f, (expr) {
+      visit(node.condition)((expr) {
         addStatement(AstFactory.ifStatement2(
           expr,
           bodyBlock,
@@ -933,7 +916,7 @@ class AsyncTransformer extends ast.AstVisitor {
                 loopBlock)));
     if (node.variables != null) {
       assert(node.variables.variables.isNotEmpty);
-      return _translateForDeclarations(node.variables.variables, f, (args) {
+      return _translateForDeclarations(node.variables.variables, (args) {
         assert(args.length == parameters.length);
         addStatement(AstFactory.returnStatement2(
             AstFactory.functionExpressionInvocation(
@@ -941,7 +924,7 @@ class AsyncTransformer extends ast.AstVisitor {
       });
     } else if (node.initialization != null) {
       assert(parameters.isEmpty);
-      return visit(node.initialization)(f, (expr) {
+      return visit(node.initialization)((expr) {
         addStatement(expr);
         addStatement(AstFactory.returnStatement2(
             AstFactory.functionExpressionInvocation(
@@ -956,15 +939,15 @@ class AsyncTransformer extends ast.AstVisitor {
   };
 
   visitFunctionDeclarationStatement(
-      ast.FunctionDeclarationStatement node) => (f, r, s) {
+      ast.FunctionDeclarationStatement node) => (r, s) {
     var decl = new AsyncTransformer().visit(node.functionDeclaration);
     addStatement(new ast.FunctionDeclarationStatement(decl));
     return s();
   };
 
-  visitIfStatement(ast.IfStatement node) => (f, r, s) {
+  visitIfStatement(ast.IfStatement node) => (r, s) {
     var hasElse = node.elseStatement != null;
-    return visit(node.condition)(f, (expr) {
+    return visit(node.condition)((expr) {
       var joinName = newName('join');
       var joinFun = reifyStatementCont(s);
       addStatement(
@@ -976,10 +959,10 @@ class AsyncTransformer extends ast.AstVisitor {
       };
       var savedBlock = currentBlock;
       var thenBlock = currentBlock = emptyBlock();
-      visit(node.thenStatement)(f, r, s);
+      visit(node.thenStatement)(r, s);
       var elseBlock = currentBlock = emptyBlock();
       if (hasElse) {
-        visit(node.elseStatement)(f, r, s);
+        visit(node.elseStatement)(r, s);
       } else {
         s();
       }
@@ -1000,7 +983,7 @@ class AsyncTransformer extends ast.AstVisitor {
     if (_isLoop(stmt) || stmt is ast.SwitchStatement) {
       return visit(stmt);
     }
-    return (f, r, s) {
+    return (r, s) {
       var breakName = newName('break');
       var savedBlock = currentBlock;
       var breakBlock = currentBlock = emptyBlock();
@@ -1015,7 +998,7 @@ class AsyncTransformer extends ast.AstVisitor {
             functionExpression([newName('x')], breakBlock)));
 
       _addJumpTargets(stmt, breakName, breakTargets, breakLabels);
-      visit(stmt)(f, r, () {
+      visit(stmt)(r, () {
         addStatement(AstFactory.returnStatement2(
           AstFactory.functionExpressionInvocation(
               identifier(breakName), [nullLiteral()])));
@@ -1026,14 +1009,14 @@ class AsyncTransformer extends ast.AstVisitor {
 
   visitRethrowExpression(ast.RethrowExpression node) => unimplemented(node);
 
-  visitReturnStatement(ast.ReturnStatement node) => (f, r, s) {
+  visitReturnStatement(ast.ReturnStatement node) => (r, s) {
     return (node.expression == null)
         ? r(AstFactory.nullLiteral())
-        : visit(node.expression)(f, (v) => r(v));
+        : visit(node.expression)((v) => r(v));
   };
 
-  visitSwitchStatement(ast.SwitchStatement node) => (f, r, s) {
-    return visit(node.expression)(f, (expr) {
+  visitSwitchStatement(ast.SwitchStatement node) => (r, s) {
+    return visit(node.expression)((expr) {
       var breakName = newName('break');
       ast.FunctionExpression breakFun = reifyStatementCont(s);
       addStatement(
@@ -1071,7 +1054,7 @@ class AsyncTransformer extends ast.AstVisitor {
           if (member.labels.isEmpty) continue;
           var savedBlock = currentBlock;
           var caseBlock = currentBlock = emptyBlock();
-          _translateStatementList(member.statements, f, r, () {
+          _translateStatementList(member.statements, r, () {
             addStatement(AstFactory.returnStatement2(
                 AstFactory.functionExpressionInvocation(
                     identifier(breakName), [])));
@@ -1093,7 +1076,7 @@ class AsyncTransformer extends ast.AstVisitor {
         var bodyBlock;
         if (member.labels.isEmpty) {
           bodyBlock = currentBlock = emptyBlock();
-          _translateStatementList(member.statements, f, r, () {
+          _translateStatementList(member.statements, r, () {
             addStatement(AstFactory.returnStatement2(
                 AstFactory.functionExpressionInvocation(
                     identifier(breakName), [])));
@@ -1120,10 +1103,10 @@ class AsyncTransformer extends ast.AstVisitor {
     });
   };
 
-  _translateCatchClause(ast.CatchClause node, f, r, s) {
+  _translateCatchClause(ast.CatchClause node, r, s) {
     var savedBlock = currentBlock;
     var catchBlock = currentBlock = emptyBlock();
-    visit(node.body)(f, r, s);
+    visit(node.body)(r, s);
     currentBlock = savedBlock;
     var parameters = [node.exceptionParameter.name];
     if (node.stackTraceParameter != null) {
@@ -1138,7 +1121,7 @@ class AsyncTransformer extends ast.AstVisitor {
     return args;
   }
 
-  visitTryStatement(ast.TryStatement node) => (f, r, s) {
+  visitTryStatement(ast.TryStatement node) => (r, s) {
     ast.Expression newJumpTarget(ast.Expression target) {
       if (target is ast.FunctionExpressionInvocation) {
         // Eta reduce.  If the target is of the form expr(), then
@@ -1162,7 +1145,7 @@ class AsyncTransformer extends ast.AstVisitor {
       finallyName = newName('finally');
       finallyContName = newName('cont');
       finallyBlock = currentBlock = emptyBlock();
-      visit(node.finallyBlock)(f, r, () {
+      visit(node.finallyBlock)(r, () {
         addStatement(AstFactory.returnStatement2(
             AstFactory.functionExpressionInvocation(
                 identifier(finallyContName), [])));
@@ -1170,12 +1153,7 @@ class AsyncTransformer extends ast.AstVisitor {
 
       breakTargets = breakTargets.map(newJumpTarget).toList();
       continueTargets = continueTargets.map(newJumpTarget).toList();
-      var fail = f, ret = r;
-      f = (e) {
-        addStatement(
-            AstFactory.returnStatement2(
-                functionExpression([], applyExpressionCont(fail, e))));
-      };
+      var ret = r;
       r = (v) {
         addStatement(
             AstFactory.returnStatement2(
@@ -1195,12 +1173,10 @@ class AsyncTransformer extends ast.AstVisitor {
     }
 
     var catchErrorArgs = node.catchClauses.map(
-        (c) => _translateCatchClause(c, f, r, s));
+        (c) => _translateCatchClause(c, r, s));
 
     var tryBlock = currentBlock = emptyBlock();
-    visit(node.body)((e) {
-      addStatement(AstFactory.throwExpression2(e));
-    }, r, s);
+    visit(node.body)(r, s);
 
     currentBlock = savedBlock;
     breakTargets = savedBreakTargets;
@@ -1240,12 +1216,12 @@ class AsyncTransformer extends ast.AstVisitor {
   };
 
   _translateDeclarationList(scanner.Keyword keyword,
-      ast.VariableDeclarationList node) => (f, s) {
+      ast.VariableDeclarationList node, s) {
     translateDecl(ast.VariableDeclaration decl, cont) {
       if (decl.initializer == null) {
         return cont(decl);
       } else {
-        return visit(decl.initializer)(f, (expr) {
+        return visit(decl.initializer)((expr) {
           return cont(AstFactory.variableDeclaration2(decl.name.name, expr));
         });
       }
@@ -1271,7 +1247,7 @@ class AsyncTransformer extends ast.AstVisitor {
       };
     }
     translateDecl(node.variables.first, cont);
-  };
+  }
 
   void _residualizeDeclarationList(scanner.Keyword keyword,
       List<ast.VariableDeclaration> decls) {
@@ -1280,18 +1256,18 @@ class AsyncTransformer extends ast.AstVisitor {
   }
 
   visitVariableDeclarationStatement(
-      ast.VariableDeclarationStatement node) => (f, r, s) {
+      ast.VariableDeclarationStatement node) => (r, s) {
     // TODO(kmillikin): A null keyword indicates a type.  Do not discard it!
     var keyword = node.variables.keyword == null
         ? scanner.Keyword.VAR
         : scanner.Keyword.keywords[node.variables.keyword.lexeme];
-    return _translateDeclarationList(keyword, node.variables)(f, (decls) {
+    return _translateDeclarationList(keyword, node.variables, (decls) {
       _residualizeDeclarationList(keyword, decls);
       return s();
     });
   };
 
-  visitWhileStatement(ast.WhileStatement node) => (f, r, s) {
+  visitWhileStatement(ast.WhileStatement node) => (r, s) {
     var breakName = newName('break');
     var continueName = newName('continue');
 
@@ -1300,13 +1276,13 @@ class AsyncTransformer extends ast.AstVisitor {
     s();
 
     var continueBlock = currentBlock = emptyBlock();
-    visit(node.condition)(f, (expr) {
+    visit(node.condition)((expr) {
       var savedBlock = currentBlock;
       var bodyBlock = currentBlock = emptyBlock();
 
       _addJumpTargets(node, breakName, breakTargets, breakLabels);
       _addJumpTargets(node, continueName, continueTargets, continueLabels);
-      visit(node.body)(f, r, () {
+      visit(node.body)(r, () {
         addStatement(
             AstFactory.returnStatement2(
                 AstFactory.functionExpressionInvocation(
@@ -1348,8 +1324,8 @@ class AsyncTransformer extends ast.AstVisitor {
   visitYieldStatement(ast.YieldStatement node) => unimplemented(node);
 
   // ---- Expressions ----
-  visitAsExpression(ast.AsExpression node) => (f, s) {
-    return visit(node.expression)(f, (expr) {
+  visitAsExpression(ast.AsExpression node) => (s) {
+    return visit(node.expression)((expr) {
       return s(AstFactory.asExpression(expr, node.type));
     });
   };
@@ -1368,13 +1344,13 @@ class AsyncTransformer extends ast.AstVisitor {
       scanner.TokenType.TILDE_SLASH_EQ: scanner.TokenType.TILDE_SLASH,
     };
 
-  visitAssignmentExpression(ast.AssignmentExpression node) => (f, s) {
+  visitAssignmentExpression(ast.AssignmentExpression node) => (s) {
     finishAssignment(lhs) {
       var nameLeft = node.operator.type != scanner.TokenType.EQ &&
           awaits.contains(node.rightHandSide);
       var lhsValue;
       if (nameLeft) lhsValue = addTempDeclaration(lhs);
-      return visit(node.rightHandSide)(f, (rhs) {
+      return visit(node.rightHandSide)((rhs) {
         if (nameLeft) {
           return s(AstFactory.assignmentExpression(lhs, scanner.TokenType.EQ,
               AstFactory.binaryExpression(lhsValue,
@@ -1406,7 +1382,7 @@ class AsyncTransformer extends ast.AstVisitor {
           AstFactory.propertyAccess(target, lhs.identifier));
     } else if (lhs is ast.PropertyAccess) {
       if (lhs.target != null) {
-        return visit(lhs.target)(f, (target) {
+        return visit(lhs.target)((target) {
           if (awaits.contains(node.rightHandSide)) {
             target = addTempDeclaration(target);
           }
@@ -1419,12 +1395,12 @@ class AsyncTransformer extends ast.AstVisitor {
       }
     } else if (lhs is ast.IndexExpression) {
       if (lhs.target != null) {
-        return visit(lhs.target)(f, (target) {
+        return visit(lhs.target)((target) {
           if (awaits.contains(lhs.index) ||
               awaits.contains(node.rightHandSide)) {
             target = addTempDeclaration(target);
           }
-          return visit(lhs.index)(f, (index) {
+          return visit(lhs.index)((index) {
             if (awaits.contains(node.rightHandSide)) {
               index = addTempDeclaration(index);
             }
@@ -1432,7 +1408,7 @@ class AsyncTransformer extends ast.AstVisitor {
          });
         });
       } else {
-        return visit(lhs.index)(f, (index) {
+        return visit(lhs.index)((index) {
           if (awaits.contains(node.rightHandSide)) {
             index = addTempDeclaration(index);
           }
@@ -1444,29 +1420,26 @@ class AsyncTransformer extends ast.AstVisitor {
     }
   };
 
-  visitAwaitExpression(ast.AwaitExpression node) => (f, s) {
-    visit(node.expression)(f, (expr) {
+  visitAwaitExpression(ast.AwaitExpression node) => (s) {
+    visit(node.expression)((expr) {
       addStatement(AstFactory.returnStatement2(
           AstFactory.methodInvocation(
-              AstFactory.methodInvocation(
-                  expr,
-                  'then',
-                  [reifyThenCallback(s, f)]),
-              'catchError',
-              [reifyExpressionCont(f, 'e')])));
+                            expr,
+                            'then',
+                            [reifyExpressionCont(s, 'x')])));
     });
   };
 
-  visitBinaryExpression(ast.BinaryExpression node) => (f, s) {
+  visitBinaryExpression(ast.BinaryExpression node) => (s) {
     if (node.operator.lexeme == '&&' || node.operator.lexeme == '||') {
       if (awaits.contains(node.rightOperand)) {
         var joinName = newName('join');
         addStatement(AstFactory.functionDeclarationStatement(null,  null,
             joinName, reifyExpressionCont(s, 'x')));
-        visit(node.leftOperand)(f, (left) {
+        visit(node.leftOperand)((left) {
           var savedBlock = currentBlock;
           var rightBlock = currentBlock = emptyBlock();
-          visit(node.rightOperand)(f, (right) {
+          visit(node.rightOperand)((right) {
             addStatement(AstFactory.functionExpressionInvocation(
                 identifier(joinName), [
                     AstFactory.conditionalExpression(right,
@@ -1491,18 +1464,18 @@ class AsyncTransformer extends ast.AstVisitor {
           }
         });
       } else {
-        visit(node.leftOperand)(f, (left) {
-          visit(node.rightOperand)(f, (right) {
+        visit(node.leftOperand)((left) {
+          visit(node.rightOperand)((right) {
             s(AstFactory.binaryExpression(left, node.operator.type, right));
           });
         });
       }
     } else {
-      return visit(node.leftOperand)(f, (left) {
+      return visit(node.leftOperand)((left) {
         if (awaits.contains(node.rightOperand)) {
           left = addTempDeclaration(left);
         }
-       return visit(node.rightOperand)(f, (right) {
+       return visit(node.rightOperand)((right) {
           s(AstFactory.binaryExpression(left, node.operator.type, right));
         });
       });
@@ -1525,8 +1498,8 @@ class AsyncTransformer extends ast.AstVisitor {
     return unreachable(node);
   }
 
-  visitCascadeExpression(ast.CascadeExpression node) => (f, s) {
-    visit(node.target)(f, (target) {
+  visitCascadeExpression(ast.CascadeExpression node) => (s) {
+    visit(node.target)((target) {
       if (node.cascadeSections.any(awaits.contains)) {
         target = addTempDeclaration(target);
       }
@@ -1545,15 +1518,15 @@ class AsyncTransformer extends ast.AstVisitor {
             addStatement(AstFactory.cascadeExpression(target, sections));
             sections.clear();
           }
-          visit(nextSection)(f, nextCont);
+          visit(nextSection)(nextCont);
         };
       }
-      return visit(node.cascadeSections.first)(f, cont);
+      return visit(node.cascadeSections.first)(cont);
     });
   };
 
-  visitConditionalExpression(ast.ConditionalExpression node) => (f, s) {
-    return visit(node.condition)(f, (expr) {
+  visitConditionalExpression(ast.ConditionalExpression node) => (s) {
+    return visit(node.condition)((expr) {
       var joinName = newName('join');
       addStatement(
           AstFactory.functionDeclarationStatement(
@@ -1563,52 +1536,52 @@ class AsyncTransformer extends ast.AstVisitor {
       };
       var savedBlock = currentBlock;
       var thenBlock = currentBlock = emptyBlock();
-      visit(node.thenExpression)(f, s);
+      visit(node.thenExpression)(s);
       var elseBlock = currentBlock = emptyBlock();
-      visit(node.elseExpression)(f, s);
+      visit(node.elseExpression)(s);
       currentBlock = savedBlock;
       addStatement(AstFactory.ifStatement2(expr, thenBlock, elseBlock));
     });
   };
 
-  visitFunctionExpression(ast.FunctionExpression node) => (f, s) {
+  visitFunctionExpression(ast.FunctionExpression node) => (s) {
     node.body = new AsyncTransformer().visit(node.body);
     return s(AstFactory.parenthesizedExpression(node));
   };
 
   visitFunctionExpressionInvocation(
-      ast.FunctionExpressionInvocation node) => (f, s) {
-    return visit(node.function)(f, (rator) {
+      ast.FunctionExpressionInvocation node) => (s) {
+    return visit(node.function)((rator) {
       if (awaits.contains(node.argumentList)) {
         rator = addTempDeclaration(rator);
       }
-      return _translateExpressionList(node.argumentList.arguments)(f, (rands) {
+      return _translateExpressionList(node.argumentList.arguments, (rands) {
         return s(AstFactory.functionExpressionInvocation(rator, rands));
       });
     });
   };
 
   // ---- Identifiers ----
-  visitSimpleIdentifier(ast.SimpleIdentifier node) => (f, s) {
+  visitSimpleIdentifier(ast.SimpleIdentifier node) => (s) {
     return s(node);
   };
 
-  visitPrefixedIdentifier(ast.PrefixedIdentifier node) => (f, s) {
+  visitPrefixedIdentifier(ast.PrefixedIdentifier node) => (s) {
     return s(node);
   };
 
-  visitIndexExpression(ast.IndexExpression node) => (f, s) {
-    return visit(node.target)(f, (e0) {
+  visitIndexExpression(ast.IndexExpression node) => (s) {
+    return visit(node.target)((e0) {
       if (awaits.contains(node.index)) {
         e0 = addTempDeclaration(e0);
       }
-      return visit(node.index)(f, (e1) {
+      return visit(node.index)((e1) {
         s(AstFactory.indexExpression(e0, e1));
       });
     });
   };
 
-  _translateExpressionList(ast.NodeList<ast.Expression> exprs) => (f, s) {
+  _translateExpressionList(ast.NodeList<ast.Expression> exprs, s) {
     if (exprs.isEmpty) {
       return s([]);
     }
@@ -1626,21 +1599,21 @@ class AsyncTransformer extends ast.AstVisitor {
         cont = (v) {
           var value = addTempDeclaration(v);
           args.add(value);
-          visit(expr)(f, current);
+          visit(expr)(current);
         };
       } else {
         cont = (v) {
           args.add(v);
-          visit(expr)(f, current);
+          visit(expr)(current);
         };
       }
     }
-    return visit(exprs.first)(f, cont);
-  };
+    return visit(exprs.first)(cont);
+  }
 
   visitInstanceCreationExpression(
-      ast.InstanceCreationExpression node) => (f, s) {
-    _translateExpressionList(node.argumentList.arguments)(f, (rands) {
+      ast.InstanceCreationExpression node) => (s) {
+    _translateExpressionList(node.argumentList.arguments, (rands) {
       s(AstFactory.instanceCreationExpression(
               scanner.Keyword.keywords[node.keyword.lexeme],
               node.constructorName,
@@ -1648,32 +1621,32 @@ class AsyncTransformer extends ast.AstVisitor {
     });
   };
 
-  visitIsExpression(ast.IsExpression node) => (f, s) {
-    return visit(node.expression)(f, (expr) {
+  visitIsExpression(ast.IsExpression node) => (s) {
+    return visit(node.expression)((expr) {
       return s(AstFactory.isExpression(
           expr, node.notOperator != null, node.type));
     });
   };
 
   // ---- Literals ----
-  visitBooleanLiteral(ast.BooleanLiteral node) => (f, s) {
+  visitBooleanLiteral(ast.BooleanLiteral node) => (s) {
     s(node);
   };
 
-  visitDoubleLiteral(ast.DoubleLiteral node) => (f, s) {
+  visitDoubleLiteral(ast.DoubleLiteral node) => (s) {
     s(node);
   };
 
-  visitIntegerLiteral(ast.IntegerLiteral node) => (f, s) {
+  visitIntegerLiteral(ast.IntegerLiteral node) => (s) {
     s(node);
   };
 
-  visitNullLiteral(ast.NullLiteral node) => (f, s) {
+  visitNullLiteral(ast.NullLiteral node) => (s) {
     return s(node);
   };
 
   // ---- StringLiterals ----
-  visitAdjacentStrings(ast.AdjacentStrings node) => (f, s) {
+  visitAdjacentStrings(ast.AdjacentStrings node) => (s) {
     assert(node.strings.isNotEmpty);
     // This code relies on translating a StringLiteral never passing a
     // non-StringLiteral to its success continuation.
@@ -1687,19 +1660,19 @@ class AsyncTransformer extends ast.AstVisitor {
       var nextCont = cont;
       cont = (e) {
         strings.add(e);
-        visit(node.strings[i])(f, nextCont);
+        visit(node.strings[i])(nextCont);
       };
     }
-    return visit(node.strings.first)(f, cont);
+    return visit(node.strings.first)(cont);
   };
 
-  visitSimpleStringLiteral(ast.SimpleStringLiteral node) => (f, s) {
+  visitSimpleStringLiteral(ast.SimpleStringLiteral node) => (s) {
     // The translation of adjacent strings relies on never passing a
     // non-StringLiteral to the success continuation here.
     return s(node);
   };
 
-  visitStringInterpolation(ast.StringInterpolation node) => (f, s) {
+  visitStringInterpolation(ast.StringInterpolation node) => (s) {
     var list = new ast.NodeList<ast.Expression>(node);
     for (var element in node.elements) {
       if (element is ast.InterpolationExpression) {
@@ -1708,7 +1681,7 @@ class AsyncTransformer extends ast.AstVisitor {
         assert(element is ast.InterpolationString);
       }
     }
-    _translateExpressionList(list)(f, (exprs) {
+    _translateExpressionList(list, (exprs) {
       var elements = <ast.InterpolationElement>[];
       int index = 0;
       for (var element in node.elements) {
@@ -1724,24 +1697,24 @@ class AsyncTransformer extends ast.AstVisitor {
     });
   };
 
-  visitSymbolLiteral(ast.SymbolLiteral node) => (f, s) {
+  visitSymbolLiteral(ast.SymbolLiteral node) => (s) {
     return s(node);
   };
 
   // ---- TypedLiterals ----
-  visitListLiteral(ast.ListLiteral node) => (f, s) {
-    _translateExpressionList(node.elements)(f, (elts) {
+  visitListLiteral(ast.ListLiteral node) => (s) {
+    _translateExpressionList(node.elements, (elts) {
       s(AstFactory.listLiteral(elts));
     });
   };
 
-  visitMapLiteral(ast.MapLiteral node) => (f, s) {
+  visitMapLiteral(ast.MapLiteral node) => (s) {
     var list = new ast.NodeList<ast.Expression>(node);
     for (var entry in node.entries) {
       list.add(entry.key);
       list.add(entry.value);
     }
-    _translateExpressionList(list)(f, (exprs) {
+    _translateExpressionList(list, (exprs) {
       var entries = <ast.MapLiteralEntry>[];
       for (var i = 0; i < exprs.length; i += 2) {
         entries.add(new ast.MapLiteralEntry(
@@ -1753,61 +1726,63 @@ class AsyncTransformer extends ast.AstVisitor {
     });
   };
 
-  visitMethodInvocation(ast.MethodInvocation node) => (f, s) {
+  visitMethodInvocation(ast.MethodInvocation node) => (s) {
     if (node.target != null) {
-      visit(node.target)(f, (rator) {
+      visit(node.target)((rator) {
         if (awaits.contains(node.argumentList)) {
           rator = addTempDeclaration(rator);
         }
-        _translateExpressionList(node.argumentList.arguments)(f, (rands) {
+        _translateExpressionList(node.argumentList.arguments, (rands) {
           s(AstFactory.methodInvocation(rator, node.methodName.name, rands));
         });
       });
     } else {
-      _translateExpressionList(node.argumentList.arguments)(f, (rands) {
+      _translateExpressionList(node.argumentList.arguments, (rands) {
         s(AstFactory.methodInvocation2(node.methodName.name, rands));
       });
     }
   };
 
-  visitNamedExpression(ast.NamedExpression node) => (f, s) {
-    return visit(node.expression)(f, (expr) {
+  visitNamedExpression(ast.NamedExpression node) => (s) {
+    return visit(node.expression)((expr) {
       return s(AstFactory.namedExpression(node.name, expr));
     });
   };
 
-  visitParenthesizedExpression(ast.ParenthesizedExpression node) => (f, s) {
-    return visit(node.expression)(f, s);
+  visitParenthesizedExpression(ast.ParenthesizedExpression node) => (s) {
+    return visit(node.expression)(s);
   };
 
-  visitPostfixExpression(ast.PostfixExpression node) => (f, s) {
-    return visit(node.operand)(f, (expr) {
+  visitPostfixExpression(ast.PostfixExpression node) => (s) {
+    return visit(node.operand)((expr) {
       return s(AstFactory.postfixExpression(expr, node.operator.type));
     });
   };
 
-  visitPrefixExpression(ast.PrefixExpression node) => (f, s) {
-    return visit(node.operand)(f, (expr) {
+  visitPrefixExpression(ast.PrefixExpression node) => (s) {
+    return visit(node.operand)((expr) {
       return s(AstFactory.prefixExpression(node.operator.type, expr));
     });
   };
 
-  visitPropertyAccess(ast.PropertyAccess node) => (f, s) {
-    return visit(node.target)(f, (expr) {
+  visitPropertyAccess(ast.PropertyAccess node) => (s) {
+    return visit(node.target)((expr) {
       return s(AstFactory.propertyAccess(expr, node.propertyName));
     });
   };
 
-  visitSuperExpression(ast.SuperExpression node) => (f,s) {
-    s(node);
+  visitSuperExpression(ast.SuperExpression node) => (s) {
+    return s(node);
   };
 
-  visitThisExpression(ast.ThisExpression node) => (f,s) {
-    s(node);
+  visitThisExpression(ast.ThisExpression node) => (s) {
+    return s(node);
   };
 
-  visitThrowExpression(ast.ThrowExpression node) => (f, s) {
-    return visit(node.expression)(f, (e) => f(e));
+  visitThrowExpression(ast.ThrowExpression node) => (s) {
+    return visit(node.expression)((expr) {
+      return s(AstFactory.throwExpression2(expr));
+    });
   };
 
   unreachable(node) => throw 'Unreachable(${node.runtimeType})';
