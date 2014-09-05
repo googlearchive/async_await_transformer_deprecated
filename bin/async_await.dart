@@ -11,6 +11,7 @@ import 'package:analyzer/src/generated/parser.dart';
 import 'package:analyzer/src/generated/scanner.dart';
 
 import 'package:async_await/src/error_collector.dart';
+import 'package:async_await/src/pretty_printer.dart';
 import 'package:async_await/src/xform.dart';
 
 main(List<String> args) {
@@ -20,7 +21,8 @@ main(List<String> args) {
   }
 
   var errorListener = new ErrorCollector();
-  var unit = _parse(new File(args.first), errorListener);
+  var source = new File(args.first).readAsStringSync();
+  var unit = _parse(source, errorListener);
   if (errorListener.errors.isNotEmpty) {
     print("Errors:");
     for (var error in errorListener.errors) {
@@ -29,13 +31,22 @@ main(List<String> args) {
     exit(1);
   }
 
+  var worklistBuilder = new WorklistBuilder();
+  worklistBuilder.visit(unit);
   var transform = new AsyncTransformer();
-  print(transform.visit(unit));
+  var pretty = new PrettyPrinter();
+  int position = 0;
+  for (var item in worklistBuilder.worklist) {
+    pretty.buffer.write(source.substring(position, item.position));
+    pretty.visit(transform.visit(item.sourceBody));
+    position = item.sourceBody.end;
+  }
+  pretty.buffer.write(source.substring(position));
+  print(pretty.buffer);
 }
 
-_parse(File file, AnalysisErrorListener errorListener) {
-  var src = file.readAsStringSync();
-  var reader = new CharSequenceReader(src);
+_parse(String source, AnalysisErrorListener errorListener) {
+  var reader = new CharSequenceReader(source);
   var scanner = new Scanner(null, reader, errorListener);
   var token = scanner.tokenize();
   var parser = new Parser(null, errorListener);
