@@ -40,7 +40,7 @@ class PrettyPrinter extends ast.RecursiveAstVisitor {
 
   visitExpressionFunctionBody(ast.ExpressionFunctionBody node) {
     buffer.write('=> ');
-    buffer.write(node.expression);
+    visit(node.expression);
   }
 
   // ---- Statements ----
@@ -340,7 +340,7 @@ class PrettyPrinter extends ast.RecursiveAstVisitor {
 
   visitAwaitExpression(ast.AwaitExpression node) {
     buffer.write('await ');
-    buffer.write(node.expression);
+    visit(node.expression);
   }
 
   visitBinaryExpression(ast.BinaryExpression node) {
