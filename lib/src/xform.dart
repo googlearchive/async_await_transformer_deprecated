@@ -9,6 +9,34 @@ import 'package:analyzer/src/generated/scanner.dart' as scanner;
 import 'package:analyzer/src/generated/testing/ast_factory.dart';
 import 'package:analyzer/src/generated/testing/token_factory.dart';
 
+class WorklistItem {
+  final int position;
+  final ast.FunctionBody sourceBody;
+
+  WorklistItem(this.position, this.sourceBody);
+}
+
+class WorklistBuilder extends ast.RecursiveAstVisitor {
+  final List<WorklistItem> worklist = <WorklistItem>[];
+  visit(ast.AstNode node) => node.accept(this);
+
+  visitExpressionFunctionBody(ast.ExpressionFunctionBody node) {
+    if (node.isAsynchronous || node.isGenerator) {
+      worklist.add(new WorklistItem(node.keyword.offset, node));
+    } else {
+      super.visitExpressionFunctionBody(node);
+    }
+  }
+
+  visitBlockFunctionBody(ast.BlockFunctionBody node) {
+    if (node.isAsynchronous || node.isGenerator) {
+      worklist.add(new WorklistItem(node.keyword.offset, node));
+    } else {
+      super.visitBlockFunctionBody(node);
+    }
+  }
+}
+
 class Analysis extends ast.GeneralizingAstVisitor<bool> {
   Set<ast.AstNode> awaits = new Set<ast.AstNode>();
   Map<ast.Statement, List<ast.Label>> labels =
