@@ -492,16 +492,14 @@ class PrettyPrinter extends ast.RecursiveAstVisitor {
     if (node.elements.isEmpty) {
       buffer.write(']');
     } else {
-      if (node.elements.isNotEmpty) {
-        withContinuationIndentation(() {
-          buffer.writeln();
-          indent(() { visit(node.elements.first); });
-          for (var element in node.elements.skip(1)) {
-            buffer.writeln(',');
-            indent(() { visit(element); });
-          }
-        });
-      }
+      withContinuationIndentation(() {
+        buffer.writeln();
+        indent(() { visit(node.elements.first); });
+        for (var element in node.elements.skip(1)) {
+          buffer.writeln(',');
+          indent(() { visit(element); });
+        }
+      });
       buffer.writeln();
       indent(() { buffer.write(']'); });
     }
