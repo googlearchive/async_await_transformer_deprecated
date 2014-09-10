@@ -457,7 +457,7 @@ class PrettyPrinter extends ast.RecursiveAstVisitor {
   visitInterpolationExpression(ast.InterpolationExpression node) {
     buffer.write('\$');
     if (node.rightBracket != null) {
-      buffer.write('\${');
+      buffer.write('{');
       visit(node.expression);
       buffer.write('}');
     } else {
@@ -489,7 +489,9 @@ class PrettyPrinter extends ast.RecursiveAstVisitor {
       buffer.write(node.typeArguments);
     }
     buffer.write('[');
-    if (node.elements.isNotEmpty) {
+    if (node.elements.isEmpty) {
+      buffer.write(']');
+    } else {
       withContinuationIndentation(() {
         buffer.writeln();
         indent(() { visit(node.elements.first); });
@@ -498,9 +500,9 @@ class PrettyPrinter extends ast.RecursiveAstVisitor {
           indent(() { visit(element); });
         }
       });
+      buffer.writeln();
+      indent(() { buffer.write(']'); });
     }
-    buffer.writeln();
-    indent(() { buffer.write(']'); });
   }
 
   visitMapLiteralEntry(ast.MapLiteralEntry node) {
@@ -518,7 +520,9 @@ class PrettyPrinter extends ast.RecursiveAstVisitor {
       buffer.write(node.typeArguments);
     }
     buffer.write('{');
-    if (node.entries.isNotEmpty) {
+    if (node.entries.isEmpty) {
+      buffer.write('}');
+    } else {
       withContinuationIndentation(() {
         buffer.writeln();
         indent(() { visit(node.entries.first); });
@@ -527,9 +531,9 @@ class PrettyPrinter extends ast.RecursiveAstVisitor {
           indent(() { visit(entry); });
         }
       });
+      buffer.writeln();
+      indent(() { buffer.write('}'); });
     }
-    buffer.writeln();
-    indent(() { buffer.write('}'); });
   }
 
   visitMethodInvocation(ast.MethodInvocation node) {
