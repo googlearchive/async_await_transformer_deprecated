@@ -884,10 +884,10 @@ class AsyncTransformer extends ast.AstVisitor {
   visitIfStatement(ast.IfStatement node) => (r, s) {
     return visit(node.condition)((expr) {
       var savedBlock = currentBlock;
+      var joinName = newName('join');
       var joinBlock = currentBlock = make.emptyBlock();
       s();
 
-      var joinName = newName('join');
       s = () {
         addStatement(make.returnStatement(make.functionInvocation(joinName)));
       };
@@ -1331,11 +1331,11 @@ class AsyncTransformer extends ast.AstVisitor {
   visitBinaryExpression(ast.BinaryExpression node) => (s) {
     if (node.operator.lexeme == '&&' || node.operator.lexeme == '||') {
       if (awaits.contains(node.rightOperand)) {
+        var joinName = newName('join');
+        var joinParameterName = newName('x');
         visit(node.leftOperand)((left) {
           var savedBlock = currentBlock;
           var joinBlock = currentBlock = make.emptyBlock();
-          var joinName = newName('join');
-          var joinParameterName = newName('x');
           s(make.identifier(joinParameterName));
 
           var rightBlock = currentBlock = make.emptyBlock();
@@ -1411,9 +1411,9 @@ class AsyncTransformer extends ast.AstVisitor {
   visitConditionalExpression(ast.ConditionalExpression node) => (s) {
     return visit(node.condition)((expr) {
       var savedBlock = currentBlock;
-      var joinBlock = currentBlock = make.emptyBlock();
       var joinName = newName('join');
       var joinParameterName = newName('x');
+      var joinBlock = currentBlock = make.emptyBlock();
       s(make.identifier(joinParameterName));
 
       s = (r) {
@@ -1500,7 +1500,7 @@ class AsyncTransformer extends ast.AstVisitor {
   visitInstanceCreationExpression(
       ast.InstanceCreationExpression node) => (s) {
     _translateExpressionList(node.argumentList.arguments, (rands) {
-      s(make.newInstance(node.constructorName.name,
+      s(make.newInstance(node.constructorName,
                          rands,
                          scanner.Keyword.keywords[node.keyword.lexeme]));
     });

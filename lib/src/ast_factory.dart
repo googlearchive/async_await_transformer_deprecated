@@ -207,13 +207,17 @@ ast.NamedExpression namedExpression(label, ast.Expression expression) {
       : AstFactory.namedExpression(label, expression);
 }
 
-ast.InstanceCreationExpression newInstance(ast.Identifier constructor,
+ast.InstanceCreationExpression newInstance(ast.AstNode constructor,
     List<ast.Expression> arguments,
     [scanner.Keyword keyword = scanner.Keyword.NEW]) {
-  return AstFactory.instanceCreationExpression2(
-      keyword,
-      AstFactory.typeName3(constructor, []),
-      arguments);
+  if (constructor is ast.ConstructorName) {
+    return AstFactory.instanceCreationExpression(
+        keyword, constructor, arguments);
+  } else {
+    assert(constructor is ast.Identifier);
+    return AstFactory.instanceCreationExpression2(
+        keyword, AstFactory.typeName3(constructor, []), arguments);
+  }
 }
 
 ast.NullLiteral nullLiteral() {
