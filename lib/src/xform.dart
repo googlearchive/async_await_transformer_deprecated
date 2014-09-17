@@ -777,7 +777,9 @@ class AsyncTransformer extends ast.AstVisitor {
           make.block(
               [make.returnStatement(make.functionInvocation(loopName))]),
           make.block(
-              [make.returnStatement(make.functionInvocation(breakName))])));
+              [make.assignmentExpression(
+                   make.identifier(inLoopName), make.booleanLiteral(false)),
+               make.returnStatement(make.functionInvocation(breakName))])));
     });
 
     var loopBlock = currentBlock = make.emptyBlock();
@@ -986,7 +988,9 @@ class AsyncTransformer extends ast.AstVisitor {
           expr,
           bodyBlock,
           make.block(
-              [make.returnStatement(make.functionInvocation(breakName))])));
+              [make.assignmentExpression(
+                   make.identifier(breakName), make.booleanLiteral(false)),
+               make.returnStatement(make.functionInvocation(breakName))])));
       });
     } else {
       addStatement(bodyBlock);
@@ -1341,7 +1345,7 @@ class AsyncTransformer extends ast.AstVisitor {
   //     }
   //     var continue_;
   //     bounce() {
-  //         final c = [[E]];
+  //         final v = [[E]];
   //         if (v) {
   //             [[S1]];
   //             return continue_();
@@ -1392,10 +1396,11 @@ class AsyncTransformer extends ast.AstVisitor {
       currentBlock = savedBlock;
       addStatement(make.ifStatement(
         expr,
-        // Trampoline the body via Future.wait.
         bodyBlock,
         make.block(
-            [make.returnStatement(make.functionInvocation(breakName))])));
+            [make.assignmentExpression(
+                 make.identifier(inLoopName), make.booleanLiteral(false)),
+             make.returnStatement(make.functionInvocation(breakName))])));
     });
 
     breakTargets = savedBreakTargets;
