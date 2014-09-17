@@ -736,6 +736,7 @@ class AsyncTransformer extends ast.AstVisitor {
   //             if (v) {
   //                 return loop();
   //             } else {
+  //                 inLoop = false;
   //                 return break_();
   //             }
   //         }
@@ -922,6 +923,7 @@ class AsyncTransformer extends ast.AstVisitor {
   //           [[S1]]
   //           return continue_();
   //         } else {
+  //           inLoop = false;
   //           return break_();
   //         }
   //     }
@@ -1350,6 +1352,7 @@ class AsyncTransformer extends ast.AstVisitor {
   //             [[S1]];
   //             return continue_();
   //         } else {
+  //             inLoop = false;
   //             return break_();
   //         }
   //     continue_ = () {
