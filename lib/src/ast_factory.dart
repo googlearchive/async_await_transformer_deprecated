@@ -25,12 +25,12 @@ ast.FunctionBody functionBody(ast.AstNode body) {
 ast.FunctionExpression functionExpression(List<String> parameters,
                                           ast.AstNode body) {
   var formalParameters = AstFactory.formalParameterList(
-      parameters.map(AstFactory.simpleFormalParameter3));
+      parameters.map(AstFactory.simpleFormalParameter3).toList());
   return AstFactory.functionExpression2(formalParameters, functionBody(body));
 }
 
-ast.SwitchCase switchCase(ast.Expression expression,
-                          List<ast.Statement> statements) {
+ast.SwitchMember switchCase(ast.Expression expression,
+                            List<ast.Statement> statements) {
   return expression == null
       ? AstFactory.switchDefault2(statements)
       : AstFactory.switchCase(expression, statements);
@@ -50,7 +50,7 @@ ast.Block block(List<ast.AstNode> body) {
       assert(node is ast.Statement);
       return node;
     }
-  });
+  }).toList();
   return AstFactory.block(statements);
 }
 
@@ -172,7 +172,7 @@ ast.FunctionExpressionInvocation functionInvocation(function,
 }
 
 // Create an optionally qualified identifier.
-ast.SimpleIdentifier identifier(String first, [String second]) {
+ast.Identifier identifier(String first, [String second]) {
   return second == null
       ? AstFactory.identifier3(first)
       : AstFactory.identifier5(first, second);

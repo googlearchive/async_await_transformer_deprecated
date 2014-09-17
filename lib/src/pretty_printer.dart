@@ -443,7 +443,7 @@ class PrettyPrinter extends ast.RecursiveAstVisitor {
   visitAdjacentStrings(ast.AdjacentStrings node) {
     visit(node.strings.first);
     withContinuationIndentation(() {
-      for (var string in node.strings) {
+      for (var string in node.strings.skip(1)) {
         buffer.writeln();
         indent(() { visit(string); });
       }
