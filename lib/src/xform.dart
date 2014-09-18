@@ -408,17 +408,37 @@ ast.VariableDeclarationStatement variableDeclaration(
           [make.variableDeclaration(name, initializer)]);
 }
 
+// Information needed to generate a break or continue from a loop or labeled
+// statement.  Needed is:
+//
+// * A list of labels (statements can have multiple labels), used to
+//   search for the target given a label of a break or continue.
+// * A zero-argument function to apply to generate the code for the jump.
+//   It returns null and has the side effect of adding the code for the
+//   jump to the curent block.
+// * An optional loop trampoline flag.  When breaking out of loops the
+//   trampoline flag for the loop must be set to false.  The apply function
+//   sets the flag, but `await` does not call the apply function and sets the
+//   flags manually instead (await returns immediately without passing through
+//   finally blocks, for instance).
+class JumpTarget {
+  final List<ast.Label> labels;
+  final apply;
+  final String inLoopName;
+
+  JumpTarget(this.labels, this.apply, [this.inLoopName]);
+}
+
 class AsyncTransformer extends ast.AstVisitor {
   Set<ast.AstNode> awaits;
   Map<ast.Statement, List<ast.Label>> labels;
   Set<String> names;
 
   ast.Block currentBlock;
-  List<ast.Expression> breakTargets;
-  List<String> breakLabels;
 
-  List<ast.Expression> continueTargets;
-  List<String> continueLabels;
+  // Stacks of targets for break and continue.
+  List<JumpTarget> breakTargets;
+  List<JumpTarget> continueTargets;
 
   visit(ast.AstNode node) => node.accept(this);
 
@@ -436,10 +456,8 @@ class AsyncTransformer extends ast.AstVisitor {
   void reset(Analysis analysis) {
     nameCounters = <String, int>{};
     currentBlock = make.emptyBlock();
-    breakTargets = <ast.Expression>[];
-    breakLabels = <String>[];
-    continueTargets = <ast.Expression>[];
-    continueLabels = <String>[];
+    breakTargets = <JumpTarget>[];
+    continueTargets = <JumpTarget>[];
     awaits = analysis.awaits;
     labels = analysis.labels;
     names = analysis.names;
@@ -618,89 +636,175 @@ class AsyncTransformer extends ast.AstVisitor {
     return _translateStatementList(node.statements, r, s);
   };
 
-  ast.Expression _findJumpTarget(node, List<ast.Expression> targets,
-                                 List<String> names) {
+  _newJumpTarget(String inLoopName) {
+    return (t) {
+      if (inLoopName == null) return t;
+      return new JumpTarget(t.labels, () {
+        addStatement(make.assignmentExpression(
+            make.identifier(inLoopName), make.booleanLiteral(false)));
+        return t.apply();
+      }, t.inLoopName);
+    };
+  }
+
+  List<JumpTarget> _addBreakTarget(List<ast.Label> labels, String targetName,
+      [String inLoopName]) {
+    var result = new List.from(breakTargets)..add(
+        new JumpTarget(labels, () {
+          addStatement(
+              make.returnStatement(make.functionInvocation(targetName)));
+        }, inLoopName));
+    return result.map(_newJumpTarget(inLoopName)).toList();
+  }
+
+  List<JumpTarget> _addContinueTarget(List<ast.Label> labels,
+      String targetName, [String inLoopName]) {
+    var result = continueTargets.map(_newJumpTarget(inLoopName)).toList();
+    return result..add(new JumpTarget(labels, () {
+      addStatement(
+          make.returnStatement(make.functionInvocation(targetName)));
+    }, inLoopName));
+  }
+
+  JumpTarget _findJumpTarget(node, List<JumpTarget> targets) {
     if (node.label == null) {
       return targets.last;
     }
-    for (var i = targets.length - 1; i >= 0; --i) {
-      if (names[i] == node.label.name) return targets[i];
+    for (var target in targets.reversed) {
+      if (target.labels == null) continue;
+      for (var label in target.labels) {
+        if (label.label.name == node.label.name) return target;
+      }
     }
-    throw 'Illegal ${node.runtimeType}: $node';
+    throw "Could not find target for '$node'";
   }
 
   visitBreakStatement(ast.BreakStatement node) => (r, s) {
-    var target = _findJumpTarget(node, breakTargets, breakLabels);
-    addStatement(make.returnStatement(target));
+    var target = _findJumpTarget(node, breakTargets);
+    return target.apply();
   };
 
   visitContinueStatement(ast.ContinueStatement node) => (r, s) {
-    var target = _findJumpTarget(node, continueTargets, continueLabels);
-    addStatement(make.returnStatement(target));
+    var target = _findJumpTarget(node, continueTargets);
+    return target.apply();
   };
 
-  _addJumpTargets(ast.AstNode node, String name, List<ast.Expression> targets,
-                  List<String> names) {
-    var target = make.functionInvocation(name);
-    if (labels[node] == null) {
-      targets.add(target);
-      names.add(null);
-    } else {
-      for (var label in labels[node]) {
-        targets.add(target);
-        names.add(label.label.name);
-      }
-    }
+  // The template of the loop trampoline loop.  A trampoline is used to avoid
+  // stack overflow for loops that contain await but have a synchronous path
+  // through the loop.
+  //
+  // If 'bounce' is the function containing the translation of the loop's
+  // continue target (which is different for do/while, for, and while loops)
+  // then the actual continue target is the trampoline loop:
+  //
+  // continue_ = () {
+  //     if (inLoop) return null;
+  //     inLoop = true;
+  //     var result;
+  //     while (inLoop) result = bounce();
+  //     return result;
+  // };
+  void _addTrampoline(String bounceName, String continueName,
+                      String inLoopName) {
+    var resultName = newName('result');
+    addStatement(
+        make.assignmentExpression(make.identifier(continueName),
+            make.functionExpression([], make.block(
+                [make.ifStatement(make.identifier(inLoopName),
+                     make.returnStatement()),
+                 make.assignmentExpression(
+                     make.identifier(inLoopName), make.booleanLiteral(true)),
+                 make.variableDeclarationStatement(scanner.Keyword.VAR,
+                     [make.variableDeclaration(resultName)]),
+                 make.whileStatement(make.identifier(inLoopName),
+                     make.expressionStatement(
+                         make.assignmentExpression(
+                             make.identifier(resultName),
+                             make.functionInvocation(bounceName)))),
+                 make.returnStatement(make.identifier(resultName))]))));
   }
 
-  _removeJumpTargets(ast.AstNode node, List<ast.Expression> targets,
-                     List<String> names) {
-    if (labels[node] == null) {
-      targets.removeLast();
-      names.removeLast();
-    } else {
-      var delta = labels[node].length;
-      targets.length -= delta;
-      names.length -= delta;
-    }
-  }
-
+  // [[do S1 while (E); S2]] =
+  //     var inLoop = false;
+  //     break_() {
+  //         [[S2]]
+  //     }
+  //     loop() {
+  //         var continue_;
+  //         bounce() {
+  //             final v = [[E]];
+  //             if (v) {
+  //                 return loop();
+  //             } else {
+  //                 inLoop = false;
+  //                 return break_();
+  //             }
+  //         }
+  //         continue_ = () {
+  //             if (inLoop) return null;
+  //             inLoop = true;
+  //             var result;
+  //             while (inLoop) result = bounce();
+  //             return result;
+  //         };
+  //         [[S1]]
+  //         return continue_();
+  //     }
+  //     return loop();
   visitDoStatement(ast.DoStatement node) => (r, s) {
     var breakName = newName('break');
     var continueName = newName('continue');
+    var inLoopName = newName('inLoop');
+    var bounceName = newName('bounce');
     var loopName = newName('loop');
 
     var savedBlock = currentBlock;
     var breakBlock = currentBlock = make.emptyBlock();
     s();
 
-    var continueBlock = currentBlock = make.emptyBlock();
+    // Though break and continue cannot occur in the loop condition, the
+    // targets are added here.  An await in the condition is like a break so
+    // the break target should be in scope for the condition.  Continue is
+    // set so that the two stacks of targets are handled uniformly.
+    var savedBreakTargets = breakTargets;
+    var savedContinueTargets = continueTargets;
+    breakTargets = _addBreakTarget(labels[node], breakName, inLoopName);
+    continueTargets =
+        _addContinueTarget(labels[node], continueName, inLoopName);
+    var bounceBlock = currentBlock = make.emptyBlock();
     visit(node.condition)((expr) {
       addStatement(make.ifStatement(
           expr,
-          make.block([make.returnStatement(make.methodInvocation(
-              make.functionInvocation(
-                  make.identifier('Future', 'wait'),
-                  [make.listLiteral([])]),
-              'then',
-              [make.functionExpression([newName('x')],
-                   make.functionInvocation(loopName))]))]),
           make.block(
-              [make.returnStatement(make.functionInvocation(breakName))])));
+              [make.returnStatement(make.functionInvocation(loopName))]),
+          make.block(
+              [make.assignmentExpression(
+                   make.identifier(inLoopName), make.booleanLiteral(false)),
+               make.returnStatement(make.functionInvocation(breakName))])));
     });
 
     var loopBlock = currentBlock = make.emptyBlock();
     addStatement(
-        make.functionDeclarationStatement(continueName, [], continueBlock));
-    _addJumpTargets(node, breakName, breakTargets, breakLabels);
-    _addJumpTargets(node, continueName, continueTargets, continueLabels);
-    visit(node.body)(r, () {
+        make.variableDeclarationStatement(scanner.Keyword.VAR,
+            [make.variableDeclaration(continueName)]));
+    addStatement(
+        make.functionDeclarationStatement(bounceName, [], bounceBlock));
+    _addTrampoline(bounceName, continueName, inLoopName);
+    visit(node.body)((v) {
+      addStatement(make.assignmentExpression(
+          make.identifier(inLoopName), make.booleanLiteral(false)));
+      return r(v);
+    }, () {
       addStatement(make.returnStatement(make.functionInvocation(continueName)));
     });
-    _removeJumpTargets(node, breakTargets, breakLabels);
-    _removeJumpTargets(node, continueTargets, continueLabels);
 
+    breakTargets = savedBreakTargets;
+    continueTargets = savedContinueTargets;
     currentBlock = savedBlock;
+    addStatement(
+        make.variableDeclarationStatement(scanner.Keyword.VAR,
+            [make.variableDeclaration(inLoopName,
+                 make.booleanLiteral(false))]));
     addStatement(
         make.functionDeclarationStatement(breakName, [], breakBlock));
     addStatement(
@@ -793,9 +897,43 @@ class AsyncTransformer extends ast.AstVisitor {
         :  visit(expr)(cont);
   }
 
- visitForStatement(ast.ForStatement node) => (r, s) {
+  // The intializer and update parts are not really expressions and all of them
+  // are optional.  Informally though, the translation is:
+  // [[for (E1; E2; E3) S1; S2]] =
+  //     var inLoop = false;
+  //     break_() {
+  //         inLoop = false;
+  //         [[S2]]
+  //     }
+  //     loop(x, ...) {
+  //         var continue_;
+  //         bounce() {
+  //             [[E3]];
+  //             return loop(x, ...);
+  //         }
+  //         continue_ = () {
+  //             if (inLoop) return null;
+  //             inLoop = true;
+  //             var result;
+  //             while (inLoop) result = bounce();
+  //             return result;
+  //         };
+  //         final v = [[E2]];
+  //         if (v) {
+  //           [[S1]]
+  //           return continue_();
+  //         } else {
+  //           inLoop = false;
+  //           return break_();
+  //         }
+  //     }
+  //     [[E1]];
+  //     return loop();
+  visitForStatement(ast.ForStatement node) => (r, s) {
     var breakName = newName('break');
     var continueName = newName('continue');
+    var inLoopName = newName('inLoop');
+    var bounceName = newName('bounce');
     var loopName = newName('loop');
 
     var savedBlock = currentBlock;
@@ -809,52 +947,68 @@ class AsyncTransformer extends ast.AstVisitor {
       parameters = <ast.SimpleIdentifier>[];
     }
 
-    var continueBlock = currentBlock = make.emptyBlock();
-    trampoline() {
-      addStatement(make.returnStatement(
-          make.methodInvocation(
-              make.functionInvocation(
-                  make.identifier('Future', 'wait'),
-                  [make.listLiteral([])]),
-              'then',
-              [make.functionExpression([newName('x')],
-                  make.functionInvocation(loopName, parameters))])));
+    // Though break and continue cannot occur in the loop condition or
+    // updaters, the targets are added here.  An await in the condition or
+    // updaters is like a break so the break target should be in scope for
+    // them.  Continue is set so that the two stacks of targets are handled
+    // uniformly.
+    var savedBreakTargets = breakTargets;
+    var savedContinueTargets = continueTargets;
+    breakTargets = _addBreakTarget(labels[node], breakName, inLoopName);
+    continueTargets =
+        _addContinueTarget(labels[node], continueName, inLoopName);
+    var bounceBlock = currentBlock = make.emptyBlock();
+    invokeLoop() {
+      addStatement(
+          make.returnStatement(make.functionInvocation(loopName, parameters)));
     }
     if (node.updaters != null) {
-      _translateForUpdaters(node.updaters, trampoline);
+      _translateForUpdaters(node.updaters, invokeLoop);
     } else {
-      trampoline();
+      invokeLoop();
     }
 
     var bodyBlock = currentBlock = make.emptyBlock();
-    _addJumpTargets(node, breakName, breakTargets, breakLabels);
-    _addJumpTargets(node, continueName, continueTargets, continueLabels);
-    visit(node.body)(r, () {
+    visit(node.body)((v) {
+      addStatement(make.assignmentExpression(
+          make.identifier(inLoopName), make.booleanLiteral(false)));
+      return r(v);
+    }, () {
       addStatement(make.returnStatement(make.functionInvocation(continueName)));
     });
-    _removeJumpTargets(node, breakTargets, breakLabels);
-    _removeJumpTargets(node, continueTargets, continueLabels);
 
     var loopBlock = currentBlock = make.emptyBlock();
     addStatement(
-        make.functionDeclarationStatement(continueName, [], continueBlock));
+        make.variableDeclarationStatement(scanner.Keyword.VAR,
+            [make.variableDeclaration(continueName)]));
+    addStatement(
+        make.functionDeclarationStatement(bounceName, [], bounceBlock));
+    _addTrampoline(bounceName, continueName, inLoopName);
     if (node.condition != null) {
       visit(node.condition)((expr) {
         addStatement(make.ifStatement(
           expr,
           bodyBlock,
           make.block(
-              [make.returnStatement(make.functionInvocation(breakName))])));
+              [make.assignmentExpression(
+                   make.identifier(breakName), make.booleanLiteral(false)),
+               make.returnStatement(make.functionInvocation(breakName))])));
       });
     } else {
       addStatement(bodyBlock);
     }
 
+    breakTargets = savedBreakTargets;
+    continueTargets = savedContinueTargets;
     currentBlock = savedBlock;
+    addStatement(
+        make.variableDeclarationStatement(scanner.Keyword.VAR,
+            [make.variableDeclaration(inLoopName,
+                 make.booleanLiteral(false))]));
     addStatement(
         make.functionDeclarationStatement(breakName, [], breakBlock));
     addStatement(make.functionDeclarationStatement(loopName,
-        parameters.map((e) => e.name), loopBlock));
+        parameters.map((e) => e.name).toList(), loopBlock));
     if (node.variables != null) {
       assert(node.variables.variables.isNotEmpty);
       return _translateForDeclarations(node.variables.variables, (args) {
@@ -928,11 +1082,12 @@ class AsyncTransformer extends ast.AstVisitor {
       addStatement(
           make.functionDeclarationStatement(breakName, [], breakBlock));
 
-      _addJumpTargets(stmt, breakName, breakTargets, breakLabels);
+      var savedBreakTargets = breakTargets;
+      breakTargets = _addBreakTarget(labels[stmt], breakName);
       visit(stmt)(r, () {
         addStatement(make.returnStatement(make.functionInvocation(breakName)));
       });
-      _removeJumpTargets(stmt, breakTargets, breakLabels);
+      breakTargets = savedBreakTargets;
     };
   }
 
@@ -955,24 +1110,29 @@ class AsyncTransformer extends ast.AstVisitor {
       addStatement(
           make.functionDeclarationStatement(breakName, [], breakBlock));
 
-      // Generate a name per labeled case.
+      // Generate a name per labeled case.  Since this is not a loop continue
+      // there is no need to worry about inLoop flags.  To avoid reallocating
+      // the continueTarget list in a loop, the targets are added manually
+      // instead of using _addContinueTarget.
+      var savedContinueTargets = continueTargets;
+      continueTargets = new List.from(continueTargets);
       var continueNames = [];
-      var savedLength = continueTargets.length;
       for (var member in node.members) {
         var labels = member.labels;
         if (labels.isNotEmpty) {
           var continueName = newName('continue');
           continueNames.add(continueName);
-          continueTargets.addAll(labels.map((_) {
-            return make.functionInvocation(continueName);
+          continueTargets.add(new JumpTarget(member.labels, () {
+            addStatement(make.returnStatement(
+                make.functionInvocation(continueName)));
           }));
-          continueLabels.addAll(labels.map((lbl) => lbl.label.name));
         }
       }
 
       // Translate the cases with bindings for the break and possible
       // continues.
-      _addJumpTargets(node, breakName, breakTargets, breakLabels);
+      var savedBreakTargets = breakTargets;
+      breakTargets = _addBreakTarget(labels[node], breakName);
       if (continueNames.isNotEmpty) {
         // Add declarations for mutable continue functions.
         addStatement(
@@ -1021,9 +1181,8 @@ class AsyncTransformer extends ast.AstVisitor {
           members.add(make.switchCase(member.expression, bodyBlock.statements));
         }
       }
-      _removeJumpTargets(node, breakTargets, breakLabels);
-      continueTargets.length = savedLength;
-      continueTargets.length = savedLength;
+      breakTargets = savedBreakTargets;
+      continueTargets = savedContinueTargets;
       currentBlock = savedBlock;
       addStatement(make.switchStatement(expr, members));
     });
@@ -1048,14 +1207,15 @@ class AsyncTransformer extends ast.AstVisitor {
   }
 
   visitTryStatement(ast.TryStatement node) => (r, s) {
-    ast.Expression newJumpTarget(ast.Expression target) {
-      if (target is ast.FunctionExpressionInvocation) {
-        // Eta reduce.  If the target is of the form expr(), then
-        // () => expr() is the same as expr.
-        return target.function;
-      } else {
-        return make.functionExpression([], target);
-      }
+    JumpTarget newJumpTarget(JumpTarget target) {
+      return new JumpTarget(target.labels, () {
+        var savedBlock = currentBlock;
+        var bodyBlock = currentBlock = make.emptyBlock();
+        target.apply();
+        currentBlock = savedBlock;
+        addStatement(make.returnStatement(
+            make.functionExpression([], bodyBlock)));
+      });
     }
 
     var savedBlock = currentBlock;
@@ -1179,46 +1339,87 @@ class AsyncTransformer extends ast.AstVisitor {
     });
   };
 
+  // [[while (E) S1; S2]] =
+  //     var inLoop = false;
+  //     break_() {
+  //         inLoop = false;
+  //         [[S2]]
+  //     }
+  //     var continue_;
+  //     bounce() {
+  //         final v = [[E]];
+  //         if (v) {
+  //             [[S1]];
+  //             return continue_();
+  //         } else {
+  //             inLoop = false;
+  //             return break_();
+  //         }
+  //     continue_ = () {
+  //         if (inLoop) return null;
+  //         inLoop = true;
+  //         var result;
+  //         while (inLoop) result = bounce();
+  //         return result;
+  //     };
+  //     return continue_();
   visitWhileStatement(ast.WhileStatement node) => (r, s) {
     var breakName = newName('break');
     var continueName = newName('continue');
+    var inLoopName = newName('inLoop');
+    var bounceName = newName('bounce');
 
     var savedBlock = currentBlock;
     var breakBlock = currentBlock = make.emptyBlock();
     s();
 
-    var continueBlock = currentBlock = make.emptyBlock();
+    // Though break and continue cannot occur in the loop condition, the
+    // targets are added here.  An await in the condition is like a break so
+    // the break target should be in scope for the condition.  Continue is
+    // set so that the two stacks of targets are handled uniformly.
+    var savedBreakTargets = breakTargets;
+    var savedContinueTargets = continueTargets;
+    breakTargets = _addBreakTarget(labels[node], breakName, inLoopName);
+    continueTargets =
+        _addContinueTarget(labels[node], continueName, inLoopName);
+    var bounceBlock = currentBlock = make.emptyBlock();
     visit(node.condition)((expr) {
       var savedBlock = currentBlock;
       var bodyBlock = currentBlock = make.emptyBlock();
 
-      _addJumpTargets(node, breakName, breakTargets, breakLabels);
-      _addJumpTargets(node, continueName, continueTargets, continueLabels);
-      visit(node.body)(r, () {
+      visit(node.body)((v) {
+        addStatement(make.assignmentExpression(
+          make.identifier(inLoopName), make.booleanLiteral(false)));
+        return r(v);
+      }, () {
         addStatement(
             make.returnStatement(make.functionInvocation(continueName)));
       });
-      _removeJumpTargets(node, breakTargets, breakLabels);
-      _removeJumpTargets(node, continueTargets, continueLabels);
-      currentBlock = savedBlock;
 
+      currentBlock = savedBlock;
       addStatement(make.ifStatement(
         expr,
-        // Trampoline the body via Future.wait.
-        make.block([make.returnStatement(make.methodInvocation(
-            make.functionInvocation(
-                make.identifier('Future', 'wait'),
-                [make.listLiteral([])]),
-            'then',
-            [make.functionExpression([newName('x')], bodyBlock)]))]),
+        bodyBlock,
         make.block(
-            [make.returnStatement(make.functionInvocation(breakName))])));
+            [make.assignmentExpression(
+                 make.identifier(inLoopName), make.booleanLiteral(false)),
+             make.returnStatement(make.functionInvocation(breakName))])));
     });
 
+    breakTargets = savedBreakTargets;
+    continueTargets = savedContinueTargets;
     currentBlock = savedBlock;
+    addStatement(
+        make.variableDeclarationStatement(scanner.Keyword.VAR,
+            [make.variableDeclaration(inLoopName,
+                 make.booleanLiteral(false))]));
     addStatement(make.functionDeclarationStatement(breakName, [], breakBlock));
     addStatement(
-        make.functionDeclarationStatement(continueName, [], continueBlock));
+        make.variableDeclarationStatement(scanner.Keyword.VAR,
+            [make.variableDeclaration(continueName)]));
+    addStatement(
+        make.functionDeclarationStatement(bounceName, [], bounceBlock));
+    _addTrampoline(bounceName, continueName, inLoopName);
     addStatement(make.returnStatement(make.functionInvocation(continueName)));
   };
 
@@ -1320,6 +1521,18 @@ class AsyncTransformer extends ast.AstVisitor {
 
   visitAwaitExpression(ast.AwaitExpression node) => (s) {
     visit(node.expression)((expr) {
+      // An await is like a break from all enclosing loops.  The outermost
+      // break gives us the list of loop flags that need to be set to false.
+      var expression;
+      for (var target in breakTargets.reversed) {
+        var name = target.inLoopName;
+        if (name != null) {
+          if (expression == null) expression = make.booleanLiteral(false);
+          expression =
+              make.assignmentExpression(make.identifier(name), expression);
+        }
+      }
+      if (expression != null) addStatement(expression);
       addStatement(make.returnStatement(
           make.methodInvocation(
                             expr,
