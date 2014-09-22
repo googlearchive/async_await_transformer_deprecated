@@ -440,6 +440,12 @@ class AsyncTransformer extends ast.AstVisitor {
   List<JumpTarget> breakTargets;
   List<JumpTarget> continueTargets;
 
+  // When inside a loop but not inside a try block or the catch block of
+  // try/catch/finally, the .then method of the awaited expression must
+  // be given an error handler that is a completer.  This is the completer
+  // name or null if none.
+  String awaitErrorHandler;
+
   visit(ast.AstNode node) => node.accept(this);
 
   Map<String, int> nameCounters;
@@ -458,6 +464,7 @@ class AsyncTransformer extends ast.AstVisitor {
     currentBlock = make.emptyBlock();
     breakTargets = <JumpTarget>[];
     continueTargets = <JumpTarget>[];
+    awaitErrorHandler = null;
     awaits = analysis.awaits;
     labels = analysis.labels;
     names = analysis.names;
@@ -588,9 +595,7 @@ class AsyncTransformer extends ast.AstVisitor {
     analysis.visit(node.block);
     reset(analysis);
 
-    visit(node.block)((v) {
-      addStatement(make.returnStatement(v));
-    }, () {
+    visit(node.block)((v) => v, () {
       addStatement(make.returnStatement());
     });
 
@@ -647,23 +652,17 @@ class AsyncTransformer extends ast.AstVisitor {
     };
   }
 
-  List<JumpTarget> _addBreakTarget(List<ast.Label> labels, String targetName,
+  List<JumpTarget> _addBreakTarget(List<ast.Label> labels, void apply(),
       [String inLoopName]) {
     var result = new List.from(breakTargets)..add(
-        new JumpTarget(labels, () {
-          addStatement(
-              make.returnStatement(make.functionInvocation(targetName)));
-        }, inLoopName));
+        new JumpTarget(labels, apply, inLoopName));
     return result.map(_newJumpTarget(inLoopName)).toList();
   }
 
-  List<JumpTarget> _addContinueTarget(List<ast.Label> labels,
-      String targetName, [String inLoopName]) {
+  List<JumpTarget> _addContinueTarget(List<ast.Label> labels, void apply(),
+      [String inLoopName]) {
     var result = continueTargets.map(_newJumpTarget(inLoopName)).toList();
-    return result..add(new JumpTarget(labels, () {
-      addStatement(
-          make.returnStatement(make.functionInvocation(targetName)));
-    }, inLoopName));
+    return result..add(new JumpTarget(labels, apply, inLoopName));
   }
 
   JumpTarget _findJumpTarget(node, List<JumpTarget> targets) {
@@ -700,13 +699,10 @@ class AsyncTransformer extends ast.AstVisitor {
   // continue_ = () {
   //     if (inLoop) return null;
   //     inLoop = true;
-  //     var result;
-  //     while (inLoop) result = bounce();
-  //     return result;
+  //     while (inLoop) bounce();
   // };
   void _addTrampoline(String bounceName, String continueName,
                       String inLoopName) {
-    var resultName = newName('result');
     addStatement(
         make.assignmentExpression(make.identifier(continueName),
             make.functionExpression([], make.block(
@@ -714,21 +710,14 @@ class AsyncTransformer extends ast.AstVisitor {
                      make.returnStatement()),
                  make.assignmentExpression(
                      make.identifier(inLoopName), make.booleanLiteral(true)),
-                 make.variableDeclarationStatement(scanner.Keyword.VAR,
-                     [make.variableDeclaration(resultName)]),
                  make.whileStatement(make.identifier(inLoopName),
                      make.expressionStatement(
-                         make.assignmentExpression(
-                             make.identifier(resultName),
-                             make.functionInvocation(bounceName)))),
-                 make.returnStatement(make.identifier(resultName))]))));
+                         make.functionInvocation(bounceName)))]))));
   }
 
   // [[do S1 while (E); S2]] =
-  //     var inLoop = false;
-  //     break_() {
-  //         [[S2]]
-  //     }
+  //     break_() { [[S2]] }
+  //     var inLoop = false, completer = new Completer();
   //     loop() {
   //         var continue_;
   //         bounce() {
@@ -737,24 +726,25 @@ class AsyncTransformer extends ast.AstVisitor {
   //                 return loop();
   //             } else {
   //                 inLoop = false;
-  //                 return break_();
+  //                 completer.complete(break_());
   //             }
   //         }
   //         continue_ = () {
   //             if (inLoop) return null;
   //             inLoop = true;
-  //             var result;
-  //             while (inLoop) result = bounce();
-  //             return result;
+  //             while (inLoop) bounce();
   //         };
   //         [[S1]]
-  //         return continue_();
+  //         continue_();
+  //         return null;
   //     }
-  //     return loop();
+  //     loop();
+  //     return completer.future;
   visitDoStatement(ast.DoStatement node) => (r, s) {
     var breakName = newName('break');
     var continueName = newName('continue');
     var inLoopName = newName('inLoop');
+    var completerName = newName('completer');
     var bounceName = newName('bounce');
     var loopName = newName('loop');
 
@@ -768,9 +758,17 @@ class AsyncTransformer extends ast.AstVisitor {
     // set so that the two stacks of targets are handled uniformly.
     var savedBreakTargets = breakTargets;
     var savedContinueTargets = continueTargets;
-    breakTargets = _addBreakTarget(labels[node], breakName, inLoopName);
-    continueTargets =
-        _addContinueTarget(labels[node], continueName, inLoopName);
+    var savedAwaitErrorHandler = awaitErrorHandler;
+    breakTargets = _addBreakTarget(labels[node], () {
+      addStatement(make.returnStatement(
+          make.methodInvocation(make.identifier(completerName),
+              'complete', [make.functionInvocation(breakName)])));
+    }, inLoopName);
+    continueTargets = _addContinueTarget(labels[node], () {
+      addStatement(make.functionInvocation(continueName));
+      addStatement(make.returnStatement());
+    }, inLoopName);
+    awaitErrorHandler = completerName;
     var bounceBlock = currentBlock = make.emptyBlock();
     visit(node.condition)((expr) {
       addStatement(make.ifStatement(
@@ -780,7 +778,9 @@ class AsyncTransformer extends ast.AstVisitor {
           make.block(
               [make.assignmentExpression(
                    make.identifier(inLoopName), make.booleanLiteral(false)),
-               make.returnStatement(make.functionInvocation(breakName))])));
+               make.returnStatement(
+                   make.methodInvocation(make.identifier(completerName),
+                       'complete', [make.functionInvocation(breakName)]))])));
     });
 
     var loopBlock = currentBlock = make.emptyBlock();
@@ -793,23 +793,32 @@ class AsyncTransformer extends ast.AstVisitor {
     visit(node.body)((v) {
       addStatement(make.assignmentExpression(
           make.identifier(inLoopName), make.booleanLiteral(false)));
-      return r(v);
+      addStatement(make.returnStatement());
+      addStatement(make.returnStatement(
+          make.methodInvocation(make.identifier(completerName),
+              'complete', [r(v)])));
     }, () {
-      addStatement(make.returnStatement(make.functionInvocation(continueName)));
+      addStatement(make.functionInvocation(continueName));
+      addStatement(make.returnStatement());
     });
 
     breakTargets = savedBreakTargets;
     continueTargets = savedContinueTargets;
+    awaitErrorHandler = savedAwaitErrorHandler;
     currentBlock = savedBlock;
-    addStatement(
-        make.variableDeclarationStatement(scanner.Keyword.VAR,
-            [make.variableDeclaration(inLoopName,
-                 make.booleanLiteral(false))]));
     addStatement(
         make.functionDeclarationStatement(breakName, [], breakBlock));
     addStatement(
+        make.variableDeclarationStatement(scanner.Keyword.VAR,
+            [make.variableDeclaration(inLoopName,
+                 make.booleanLiteral(false)),
+             make.variableDeclaration(completerName,
+                 make.newInstance(make.identifier('Completer'), []))]));
+    addStatement(
         make.functionDeclarationStatement(loopName, [], loopBlock));
-    addStatement(make.returnStatement(make.functionInvocation(loopName)));
+    addStatement(make.functionInvocation(loopName));
+    addStatement(make.returnStatement(
+        make.propertyAccess(make.identifier(completerName), 'future')));
   };
 
   visitEmptyStatement(ast.EmptyStatement node) => (r, s) {
@@ -900,11 +909,8 @@ class AsyncTransformer extends ast.AstVisitor {
   // The intializer and update parts are not really expressions and all of them
   // are optional.  Informally though, the translation is:
   // [[for (E1; E2; E3) S1; S2]] =
-  //     var inLoop = false;
-  //     break_() {
-  //         inLoop = false;
-  //         [[S2]]
-  //     }
+  //     break_() { [[S2]] }
+  //     var inLoop = false, completer = new Completer();
   //     loop(x, ...) {
   //         var continue_;
   //         bounce() {
@@ -914,25 +920,26 @@ class AsyncTransformer extends ast.AstVisitor {
   //         continue_ = () {
   //             if (inLoop) return null;
   //             inLoop = true;
-  //             var result;
-  //             while (inLoop) result = bounce();
-  //             return result;
+  //             while (inLoop) bounce();
   //         };
   //         final v = [[E2]];
   //         if (v) {
   //           [[S1]]
-  //           return continue_();
+  //           continue_();
+  //           return null;
   //         } else {
   //           inLoop = false;
-  //           return break_();
+  //           completer.complete(break_());
   //         }
   //     }
   //     [[E1]];
-  //     return loop();
+  //     loop();
+  //     return completer.future;
   visitForStatement(ast.ForStatement node) => (r, s) {
     var breakName = newName('break');
     var continueName = newName('continue');
     var inLoopName = newName('inLoop');
+    var completerName = newName('completer');
     var bounceName = newName('bounce');
     var loopName = newName('loop');
 
@@ -954,9 +961,17 @@ class AsyncTransformer extends ast.AstVisitor {
     // uniformly.
     var savedBreakTargets = breakTargets;
     var savedContinueTargets = continueTargets;
-    breakTargets = _addBreakTarget(labels[node], breakName, inLoopName);
-    continueTargets =
-        _addContinueTarget(labels[node], continueName, inLoopName);
+    var savedAwaitErrorHandler = awaitErrorHandler;
+    breakTargets = _addBreakTarget(labels[node], () {
+      addStatement(make.returnStatement(
+          make.methodInvocation(make.identifier(completerName),
+              'complete', [make.functionInvocation(breakName)])));
+    }, inLoopName);
+    continueTargets = _addContinueTarget(labels[node], () {
+      addStatement(make.functionInvocation(continueName));
+      addStatement(make.returnStatement());
+    }, inLoopName);
+    awaitErrorHandler = completerName;
     var bounceBlock = currentBlock = make.emptyBlock();
     invokeLoop() {
       addStatement(
@@ -972,9 +987,12 @@ class AsyncTransformer extends ast.AstVisitor {
     visit(node.body)((v) {
       addStatement(make.assignmentExpression(
           make.identifier(inLoopName), make.booleanLiteral(false)));
-      return r(v);
+      addStatement(make.returnStatement(
+          make.methodInvocation(make.identifier(completerName),
+              'complete', [r(v)])));
     }, () {
-      addStatement(make.returnStatement(make.functionInvocation(continueName)));
+      addStatement(make.functionInvocation(continueName));
+      addStatement(make.returnStatement());
     });
 
     var loopBlock = currentBlock = make.emptyBlock();
@@ -992,7 +1010,9 @@ class AsyncTransformer extends ast.AstVisitor {
           make.block(
               [make.assignmentExpression(
                    make.identifier(breakName), make.booleanLiteral(false)),
-               make.returnStatement(make.functionInvocation(breakName))])));
+               make.returnStatement(
+                   make.methodInvocation(make.identifier(completerName),
+                       'complete', [make.functionInvocation(breakName)]))])));
       });
     } else {
       addStatement(bodyBlock);
@@ -1001,30 +1021,38 @@ class AsyncTransformer extends ast.AstVisitor {
     breakTargets = savedBreakTargets;
     continueTargets = savedContinueTargets;
     currentBlock = savedBlock;
+    awaitErrorHandler = savedAwaitErrorHandler;
+    addStatement(
+        make.functionDeclarationStatement(breakName, [], breakBlock));
     addStatement(
         make.variableDeclarationStatement(scanner.Keyword.VAR,
             [make.variableDeclaration(inLoopName,
-                 make.booleanLiteral(false))]));
-    addStatement(
-        make.functionDeclarationStatement(breakName, [], breakBlock));
+                 make.booleanLiteral(false)),
+             make.variableDeclaration(completerName,
+                 make.newInstance(make.identifier('Completer'), []))]));
     addStatement(make.functionDeclarationStatement(loopName,
         parameters.map((e) => e.name).toList(), loopBlock));
     if (node.variables != null) {
       assert(node.variables.variables.isNotEmpty);
       return _translateForDeclarations(node.variables.variables, (args) {
         assert(args.length == parameters.length);
-        addStatement(
-            make.returnStatement(make.functionInvocation(loopName, args)));
+        addStatement(make.functionInvocation(loopName, args));
+        addStatement(make.returnStatement(
+            make.propertyAccess(make.identifier(completerName), 'future')));
       });
     } else if (node.initialization != null) {
       assert(parameters.isEmpty);
       return visit(node.initialization)((expr) {
         addStatement(expr);
-        addStatement(make.returnStatement(make.functionInvocation(loopName)));
+        addStatement(make.functionInvocation(loopName));
+        addStatement(make.returnStatement(
+            make.propertyAccess(make.identifier(completerName), 'future')));
       });
     } else {
       assert(parameters.isEmpty);
-      addStatement(make.returnStatement(make.functionInvocation(loopName)));
+      addStatement(make.functionInvocation(loopName));
+      addStatement(make.returnStatement(
+          make.propertyAccess(make.identifier(completerName), 'future')));
     }
   };
 
@@ -1083,7 +1111,9 @@ class AsyncTransformer extends ast.AstVisitor {
           make.functionDeclarationStatement(breakName, [], breakBlock));
 
       var savedBreakTargets = breakTargets;
-      breakTargets = _addBreakTarget(labels[stmt], breakName);
+      breakTargets = _addBreakTarget(labels[stmt], () {
+        addStatement(make.returnStatement(make.functionInvocation(breakName)));
+      });
       visit(stmt)(r, () {
         addStatement(make.returnStatement(make.functionInvocation(breakName)));
       });
@@ -1095,8 +1125,10 @@ class AsyncTransformer extends ast.AstVisitor {
 
   visitReturnStatement(ast.ReturnStatement node) => (r, s) {
     return (node.expression == null)
-        ? r(make.nullLiteral())
-        : visit(node.expression)((v) => r(v));
+        ? addStatement(make.returnStatement(r(make.nullLiteral())))
+        : visit(node.expression)((v) {
+            addStatement(make.returnStatement(r(v)));
+          });
   };
 
   visitSwitchStatement(ast.SwitchStatement node) => (r, s) {
@@ -1132,7 +1164,9 @@ class AsyncTransformer extends ast.AstVisitor {
       // Translate the cases with bindings for the break and possible
       // continues.
       var savedBreakTargets = breakTargets;
-      breakTargets = _addBreakTarget(labels[node], breakName);
+      breakTargets = _addBreakTarget(labels[node], () {
+        addStatement(make.returnStatement(make.functionInvocation(breakName)));
+      });
       if (continueNames.isNotEmpty) {
         // Add declarations for mutable continue functions.
         addStatement(
@@ -1251,15 +1285,17 @@ class AsyncTransformer extends ast.AstVisitor {
       };
     }
 
+    var savedAwaitErrorHandler = awaitErrorHandler;
+    awaitErrorHandler = null;
     var catchErrorArgs = node.catchClauses.map(
         (c) => _translateCatchClause(c, r, s));
-
     var tryBlock = currentBlock = make.emptyBlock();
     visit(node.body)(r, s);
 
     currentBlock = savedBlock;
     breakTargets = savedBreakTargets;
     continueTargets = savedContinueTargets;
+    awaitErrorHandler = savedAwaitErrorHandler;
     addStatement(make.functionDeclarationStatement(joinName, [], joinBlock));
 
     if (finallyBlock != null) {
@@ -1340,33 +1376,30 @@ class AsyncTransformer extends ast.AstVisitor {
   };
 
   // [[while (E) S1; S2]] =
-  //     var inLoop = false;
-  //     break_() {
-  //         inLoop = false;
-  //         [[S2]]
-  //     }
-  //     var continue_;
+  //     break_() { [[S2]] }
+  //     var inLoop = false, completer = new Completer(), continue_;
   //     bounce() {
   //         final v = [[E]];
   //         if (v) {
   //             [[S1]];
-  //             return continue_();
+  //             continue_();
+  //             return null;
   //         } else {
   //             inLoop = false;
-  //             return break_();
+  //             return completer.complete(break_());
   //         }
   //     continue_ = () {
   //         if (inLoop) return null;
   //         inLoop = true;
-  //         var result;
-  //         while (inLoop) result = bounce();
-  //         return result;
+  //         while (inLoop) bounce();
   //     };
-  //     return continue_();
+  //     continue_();
+  //     return completer.future;
   visitWhileStatement(ast.WhileStatement node) => (r, s) {
     var breakName = newName('break');
     var continueName = newName('continue');
     var inLoopName = newName('inLoop');
+    var completerName = newName('completer');
     var bounceName = newName('bounce');
 
     var savedBlock = currentBlock;
@@ -1379,9 +1412,17 @@ class AsyncTransformer extends ast.AstVisitor {
     // set so that the two stacks of targets are handled uniformly.
     var savedBreakTargets = breakTargets;
     var savedContinueTargets = continueTargets;
-    breakTargets = _addBreakTarget(labels[node], breakName, inLoopName);
-    continueTargets =
-        _addContinueTarget(labels[node], continueName, inLoopName);
+    var savedAwaitErrorHandler = awaitErrorHandler;
+    breakTargets = _addBreakTarget(labels[node], () {
+      addStatement(make.returnStatement(
+          make.methodInvocation(make.identifier(completerName),
+              'complete', [make.functionInvocation(breakName)])));
+    }, inLoopName);
+    continueTargets = _addContinueTarget(labels[node], () {
+      addStatement(make.functionInvocation(continueName));
+      addStatement(make.returnStatement());
+    }, inLoopName);
+    awaitErrorHandler = completerName;
     var bounceBlock = currentBlock = make.emptyBlock();
     visit(node.condition)((expr) {
       var savedBlock = currentBlock;
@@ -1390,10 +1431,12 @@ class AsyncTransformer extends ast.AstVisitor {
       visit(node.body)((v) {
         addStatement(make.assignmentExpression(
           make.identifier(inLoopName), make.booleanLiteral(false)));
-        return r(v);
+        addStatement(make.returnStatement(
+            make.methodInvocation(make.identifier(completerName),
+                'complete', [r(v)])));
       }, () {
-        addStatement(
-            make.returnStatement(make.functionInvocation(continueName)));
+        addStatement(make.functionInvocation(continueName));
+        addStatement(make.returnStatement());
       });
 
       currentBlock = savedBlock;
@@ -1403,24 +1446,29 @@ class AsyncTransformer extends ast.AstVisitor {
         make.block(
             [make.assignmentExpression(
                  make.identifier(inLoopName), make.booleanLiteral(false)),
-             make.returnStatement(make.functionInvocation(breakName))])));
+             make.returnStatement(
+                 make.methodInvocation(make.identifier(completerName),
+                     'complete', [make.functionInvocation(breakName)]))])));
     });
 
     breakTargets = savedBreakTargets;
     continueTargets = savedContinueTargets;
     currentBlock = savedBlock;
-    addStatement(
-        make.variableDeclarationStatement(scanner.Keyword.VAR,
-            [make.variableDeclaration(inLoopName,
-                 make.booleanLiteral(false))]));
+    awaitErrorHandler = savedAwaitErrorHandler;
     addStatement(make.functionDeclarationStatement(breakName, [], breakBlock));
     addStatement(
         make.variableDeclarationStatement(scanner.Keyword.VAR,
-            [make.variableDeclaration(continueName)]));
+            [make.variableDeclaration(inLoopName,
+                 make.booleanLiteral(false)),
+             make.variableDeclaration(completerName,
+                 make.newInstance(make.identifier('Completer'), [])),
+             make.variableDeclaration(continueName)]));
     addStatement(
         make.functionDeclarationStatement(bounceName, [], bounceBlock));
     _addTrampoline(bounceName, continueName, inLoopName);
-    addStatement(make.returnStatement(make.functionInvocation(continueName)));
+    addStatement(make.functionInvocation(continueName));
+    addStatement(make.returnStatement(
+        make.propertyAccess(make.identifier(completerName), 'future')));
   };
 
   visitYieldStatement(ast.YieldStatement node) => unimplemented(node);
@@ -1533,11 +1581,17 @@ class AsyncTransformer extends ast.AstVisitor {
         }
       }
       if (expression != null) addStatement(expression);
+      var arguments = <ast.Expression>[reifyExpressionCont(s, 'x')];
+      // If necessary add an onError argument to .then.  `, onError: ` is
+      // 11 characters, two shorter than `).catchError(`, and we don't need
+      // the handler to cover the await subexpression itself because it
+      // will have the correct handler anyway.
+      if (awaitErrorHandler != null) {
+        arguments.add(make.namedExpression('onError',
+            make.identifier(awaitErrorHandler, 'completeError')));
+      }
       addStatement(make.returnStatement(
-          make.methodInvocation(
-                            expr,
-                            'then',
-                            [reifyExpressionCont(s, 'x')])));
+          make.methodInvocation(expr, 'then', arguments)));
     });
   };
 

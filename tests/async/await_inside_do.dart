@@ -30,3 +30,28 @@ test2() async {
   } while (await g(x));
   print('done');
 }
+
+// Nested awaits in the body.
+test3() async {
+  var x = 0;
+  do {
+    x = x + 1;
+    await f(x);
+    await f(x + 1);
+  } while (await g(x));
+  print('done');
+}
+  
+// try/catch in the body.
+test4() async {
+  var x = 0;
+  do {
+    x = x + 1;
+    await f(x);
+    try {
+      await f(x + 1);
+    } catch (e) {
+    }
+  } while (await g(x));
+  print('done');
+}
