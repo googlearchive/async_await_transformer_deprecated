@@ -659,7 +659,7 @@ class AsyncTransformer extends ast.AstVisitor {
     return result.map(_newJumpTarget(inLoopName)).toList();
   }
 
-  List<JumpTarget> _addContinueTarget(List<ast.Label> labels,void apply(),
+  List<JumpTarget> _addContinueTarget(List<ast.Label> labels, void apply(),
       [String inLoopName]) {
     var result = continueTargets.map(_newJumpTarget(inLoopName)).toList();
     return result..add(new JumpTarget(labels, apply, inLoopName));
