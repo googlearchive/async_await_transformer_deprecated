@@ -1264,7 +1264,7 @@ class AsyncTransformer extends ast.AstVisitor {
       continueTargets = continueTargets.map(newJumpTarget).toList();
       var ret = r;
       r = (v) {
-        return make.functionExpression([], abstractReturnCont(ret, v));
+        return abstractReturnCont(ret, v);
       };
       s = () {
         addStatement(make.returnStatement(make.identifier(joinName)));
@@ -1378,6 +1378,7 @@ class AsyncTransformer extends ast.AstVisitor {
   //             inLoop = false;
   //             return completer.complete(break_());
   //         }
+  //     }
   //     continue_ = () {
   //         if (inLoop) return null;
   //         inLoop = true;
