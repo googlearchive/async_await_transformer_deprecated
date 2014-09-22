@@ -502,20 +502,14 @@ class AsyncTransformer extends ast.AstVisitor {
     return make.functionExpression([name], bodyBlock);
   }
 
-  ast.AstNode applyExpressionCont(f, v) {
-    v = addTempDeclaration(v);
+  // For finally blocks, the return continuation is wrapped in a thunk.
+  ast.FunctionExpression abstractReturnCont(r, expr) {
+    var v = addTempDeclaration(expr);
     var savedBlock = currentBlock;
     var bodyBlock = currentBlock = make.emptyBlock();
-    f(v);
+    addStatement(make.returnStatement(r(v)));
     currentBlock = savedBlock;
-
-    var body = bodyBlock;
-    if (body.statements.length == 1 &&
-        body.statements.first is ast.ReturnStatement) {
-      body = (body.statements.first as ast.ReturnStatement).expression;
-      if (body == null) body = make.nullLiteral();
-    }
-    return body;
+    return make.functionExpression([], bodyBlock);
   }
 
   // ---- CompilationUnit ----
@@ -793,10 +787,8 @@ class AsyncTransformer extends ast.AstVisitor {
     visit(node.body)((v) {
       addStatement(make.assignmentExpression(
           make.identifier(inLoopName), make.booleanLiteral(false)));
-      addStatement(make.returnStatement());
-      addStatement(make.returnStatement(
-          make.methodInvocation(make.identifier(completerName),
-              'complete', [r(v)])));
+      return make.methodInvocation(
+          make.identifier(completerName), 'complete', [r(v)]);
     }, () {
       addStatement(make.functionInvocation(continueName));
       addStatement(make.returnStatement());
@@ -987,9 +979,8 @@ class AsyncTransformer extends ast.AstVisitor {
     visit(node.body)((v) {
       addStatement(make.assignmentExpression(
           make.identifier(inLoopName), make.booleanLiteral(false)));
-      addStatement(make.returnStatement(
-          make.methodInvocation(make.identifier(completerName),
-              'complete', [r(v)])));
+      return make.methodInvocation(make.identifier(
+          completerName), 'complete', [r(v)]);
     }, () {
       addStatement(make.functionInvocation(continueName));
       addStatement(make.returnStatement());
@@ -1273,8 +1264,7 @@ class AsyncTransformer extends ast.AstVisitor {
       continueTargets = continueTargets.map(newJumpTarget).toList();
       var ret = r;
       r = (v) {
-        addStatement(make.returnStatement(
-            make.functionExpression([], applyExpressionCont(ret, v))));
+        return make.functionExpression([], abstractReturnCont(ret, v));
       };
       s = () {
         addStatement(make.returnStatement(make.identifier(joinName)));
@@ -1431,9 +1421,8 @@ class AsyncTransformer extends ast.AstVisitor {
       visit(node.body)((v) {
         addStatement(make.assignmentExpression(
           make.identifier(inLoopName), make.booleanLiteral(false)));
-        addStatement(make.returnStatement(
-            make.methodInvocation(make.identifier(completerName),
-                'complete', [r(v)])));
+        return make.methodInvocation(
+            make.identifier(completerName), 'complete', [r(v)]);
       }, () {
         addStatement(make.functionInvocation(continueName));
         addStatement(make.returnStatement());
