@@ -1,3 +1,5 @@
+import 'dart:async';
+
 f(s) {
   return new Future(() => print(s));
 }
@@ -14,7 +16,7 @@ test0(flag) async {
   print('after');
 }
 
-test1(x) async {
+test1(flag) async {
   print('before');
   if (flag) {
     print('true');
@@ -24,7 +26,7 @@ test1(x) async {
   g(print('a'), await f('b'), print('c'));
 }
 
-test2(x) async {
+test2(flag) async {
   print('before');
   if (flag) {
     g(print('a'), await f('true'), print('c'));
@@ -34,7 +36,7 @@ test2(x) async {
   print('after');
 }
 
-test3(x) async {
+test3(flag) async {
   print('before');
   if (flag) {
     g(print('a'), await f('true'), print('c'));
@@ -44,7 +46,7 @@ test3(x) async {
   print('after');
 }
 
-test4(x) async {
+test4(flag) async {
   print('before');
   if (flag) {
     print('true');
@@ -62,7 +64,7 @@ test5(flag) async {
   print('after');
 }
 
-test6(x) async {
+test6(flag) async {
   print('before');
   if (flag) {
     print('true');
@@ -70,7 +72,7 @@ test6(x) async {
   g(print('a'), await f('b'), print('c'));
 }
 
-test7(x) async {
+test7(flag) async {
   print('before');
   if (flag) {
     g(print('a'), await f('true'), print('c'));

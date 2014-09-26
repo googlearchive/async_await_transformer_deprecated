@@ -3,3 +3,9 @@ description: Compile-time support for "async/await" syntax in Dart.
 dependencies:
   analyzer: '>=0.22.4 <0.23.0'
   barback: '>=0.15.0 <0.16.0'
+dev_dependencies:
+  expect:
+    path: ../../dart-git/dart/pkg/expect
+  http:
+    path: ../../dart-git/dart/pkg/http
+  pretty: '>=0.0.9 <0.1.0'

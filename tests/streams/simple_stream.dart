@@ -6,5 +6,5 @@ main() async*{
 
 f() async* {
    yield 1;
-   throw “boom”;
+   throw "boom";
 }

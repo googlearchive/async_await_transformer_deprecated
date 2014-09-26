@@ -1,3 +1,5 @@
+import 'dart:async';
+
 main() async {
   await awaitany(constant(1), constant(2));
 }
@@ -20,6 +22,6 @@ awaitany(a,b) async {
       }
     });
   } finally { 
-    return await completer.future();
+    return await completer.future;
   }
 }

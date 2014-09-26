@@ -12,7 +12,7 @@ f() sync* {
         continue _1;
      break;
      _1: case 1:
-        if(i— <= 0) return;
+        if(i-- <= 0) return;
         yield 2;
         continue _0;
      break;
