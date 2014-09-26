@@ -1170,6 +1170,16 @@ class AsyncTransformer extends ast.AstVisitor {
 
     currentBlock = savedBlock;
     var catchName = newName('catch');
+    // Entering the catch block from the try block is one of two places
+    // where we jump out of a place to one with a different handler (the other
+    // is entering the finally block from the try block of try/catch/finally).
+    // We need to have an appropriate exception handler in place for catching
+    // synchronous exceptions.
+    catchBlock = make.tryStatement(catchBlock,
+        [make.catchClause(null, exceptionName, stackTraceName,
+             make.block([make.functionInvocation(ek,
+                 [make.identifier(exceptionName),
+                  make.identifier(stackTraceName)])]))]);
     addStatement(make.functionDeclarationStatement(catchName,
         [exceptionName, stackTraceName], catchBlock));
     return catchName;
@@ -1213,6 +1223,20 @@ class AsyncTransformer extends ast.AstVisitor {
       visit(node.finallyBlock)(rk, ek, () {
         addStatement(make.functionInvocation(finallyContName));
       });
+      // Entering the finally block from the try block of a try/catch/finally
+      // is one of two places where we jump out of a place to one with a
+      // different handler (the other is entering the catch block from the try
+      // block.  We need to have an appropriate exception handler in place for
+      // catching synchronous exceptions.
+      var exceptionName = newName('e');
+      var stackTraceName = newName('s');
+      if (node.catchClauses.isNotEmpty) {
+        finallyBlock = make.tryStatement(finallyBlock,
+            [make.catchClause(null, exceptionName, stackTraceName,
+                 make.block([make.functionInvocation(ek,
+                     [make.identifier(exceptionName),
+                      make.identifier(stackTraceName)])]))]);
+      }
 
       breakTargets = breakTargets.map(newBreakTarget).toList();
       continueTargets = continueTargets.map(newContinueTarget).toList();
@@ -1226,8 +1250,6 @@ class AsyncTransformer extends ast.AstVisitor {
         addStatement(make.functionInvocation(finallyName,
             [make.functionExpression([], returnBlock)]));
       };
-      var exceptionName = newName('e');
-      var stackTraceName = newName('s');
       ek = make.parenthesizedExpression(
           make.functionExpression([exceptionName, stackTraceName],
               make.functionInvocation(finallyName,
@@ -1247,6 +1269,10 @@ class AsyncTransformer extends ast.AstVisitor {
 
     currentBlock = savedBlock;
     addStatement(make.functionDeclarationStatement(joinName, [], joinBlock));
+    if (finallyBlock != null) {
+      addStatement(make.functionDeclarationStatement(
+          finallyName, [finallyContName], finallyBlock));
+    }
     var catchName = _translateCatchClauses(node.catchClauses, rk, ek, sk);
 
     var tryBlock = currentBlock = make.emptyBlock();
@@ -1257,10 +1283,6 @@ class AsyncTransformer extends ast.AstVisitor {
     breakTargets = savedBreakTargets;
     continueTargets = savedContinueTargets;
 
-    if (finallyBlock != null) {
-      addStatement(make.functionDeclarationStatement(
-          finallyName, [finallyContName], finallyBlock));
-    }
     var exceptionName = newName('e');
     var stackTraceName = newName('s');
     var catchBlock;
