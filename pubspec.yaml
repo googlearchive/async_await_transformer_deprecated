@@ -6,6 +6,5 @@ dependencies:
 dev_dependencies:
   expect:
     path: ../../dart-git/dart/pkg/expect
-  http:
-    path: ../../dart-git/dart/pkg/http
+  http: any
   pretty: '>=0.0.9 <0.1.0'
