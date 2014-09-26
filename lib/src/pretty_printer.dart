@@ -418,7 +418,7 @@ class PrettyPrinter extends ast.RecursiveAstVisitor {
 
   visitIsExpression(ast.IsExpression node) {
     visit(node.expression);
-    buffer.write(' as ');
+    buffer.write(node.notOperator != null ? ' is! ' : ' is ');
     visit(node.type);
   }
 

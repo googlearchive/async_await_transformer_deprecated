@@ -592,7 +592,15 @@ class AsyncTransformer extends ast.AstVisitor {
              [make.variableDeclaration(completerName,
                   make.newInstance(make.identifier('Completer'), []))]),
          make.functionInvocation('scheduleMicrotask',
-             [make.functionExpression([], currentBlock)]),
+             [make.functionExpression([],
+                  make.tryStatement(currentBlock,
+                      [make.catchClause(null, 'e', 's',
+                           make.block(
+                               [make.methodInvocation(
+                                    make.identifier(completerName),
+                                    'completeError',
+                                    [make.identifier('e'),
+                                     make.identifier('s')])]))]))]),
          make.returnStatement(make.propertyAccess(
              make.identifier(completerName), 'future'))]));
   }
@@ -1210,6 +1218,7 @@ class AsyncTransformer extends ast.AstVisitor {
       continueTargets = continueTargets.map(newContinueTarget).toList();
       var ret = rk;
       rk = (v) {
+        v = addTempDeclaration(v);
         var savedBlock = currentBlock;
         var returnBlock = currentBlock = make.emptyBlock();
         ret(v);
