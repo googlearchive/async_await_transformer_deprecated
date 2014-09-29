@@ -425,6 +425,46 @@ class JumpTarget {
   JumpTarget(this.labels, this.expression, [this.trampolineName]);
 }
 
+abstract class ErrorContinuation {
+  ast.Expression reify();
+  ast.Expression apply(String exceptionName, String stackTraceName);
+}
+
+class NamedErrorContinuation extends ErrorContinuation {
+  final ast.Identifier name;
+
+  NamedErrorContinuation(String first, [String second])
+      : name = make.identifier(first, second);
+
+  ast.Expression reify() {
+    return name;
+  }
+
+  ast.Expression apply(String exceptionName, String stackTraceName) {
+    return make.functionInvocation(name,
+        [make.identifier(exceptionName), make.identifier(stackTraceName)]);
+  }
+}
+
+class AnonymousErrorContinuation extends ErrorContinuation {
+  final AsyncTransformer owner;
+  final applyFunction;
+
+  AnonymousErrorContinuation(AsyncTransformer this.owner,
+      ast.Expression this.applyFunction(String e, String s));
+
+  ast.Expression reify() {
+    var exceptionName = owner.newName('e');
+    var stackTraceName = owner.newName('s');
+    return make.functionExpression([exceptionName, stackTraceName],
+        applyFunction(exceptionName, stackTraceName));
+  }
+
+  ast.Expression apply(String exceptionName, String stackTraceName) {
+    return applyFunction(exceptionName, stackTraceName);
+  }
+}
+
 class AsyncTransformer extends ast.AstVisitor {
   Set<ast.AstNode> awaits;
   Map<ast.Statement, List<ast.Label>> labels;
@@ -582,7 +622,7 @@ class AsyncTransformer extends ast.AstVisitor {
     visit(node.block)((v) {
       addStatement(make.methodInvocation(make.identifier(completerName),
           'complete', [v]));
-    }, make.identifier(completerName, 'completeError'), () {
+    }, new NamedErrorContinuation(completerName, 'completeError'), () {
       addStatement(make.methodInvocation(make.identifier(completerName),
           'complete', []));
     });
@@ -1121,65 +1161,67 @@ class AsyncTransformer extends ast.AstVisitor {
   };
 
   _translateCatchClauses(List<ast.CatchClause> clauses, rk, ek, sk) {
-    if (clauses.isEmpty) return null;
-
-    // The exception and stack trace parameters do not necessarily have the
-    // same name for all clauses.  If there is only one clause, choose those
-    // names.  Otherwise, choose fresh names to avoid shadowing anything.
-    var exceptionName, stackTraceName;
-    if (clauses.length == 1) {
-      var only = clauses.first;
-      exceptionName = only.exceptionParameter.name;
-      stackTraceName = only.stackTraceParameter == null
-          ? newName('s')
-          : only.stackTraceParameter.name;
-    } else {
+    var catchName = newName('catch');
+    var exceptionName, stackTraceName, catchBlock;
+    if (clauses.isEmpty) {
       exceptionName = newName('e');
       stackTraceName = newName('s');
-    }
-    // Build a chain of if/else statements nested in the else blocks.
-    // Construct them in reverse with catchBlock as the accumulator.  If a
-    // clause is unconditional, it will orphan the previous clauses.  Base
-    // case (the final else clause) is to rethrow the exception.
-    var catchBlock =
-        make.block([make.throwExpression(make.identifier(exceptionName))]);
-    var savedBlock = currentBlock;
-    for (var clause in clauses.reversed) {
-      var bodyBlock = currentBlock = make.emptyBlock();
-      if (clause.exceptionParameter.name != exceptionName) {
-        addStatement(make.assignmentExpression(clause.exceptionParameter,
-            make.identifier(exceptionName)));
-      }
-      if (clause.stackTraceParameter != null &&
-          clause.stackTraceParameter.name != stackTraceName) {
-        addStatement(make.assignmentExpression(clause.stackTraceParameter,
-            make.identifier(stackTraceName)));
-      }
-      visit(clause.body)(rk, ek, sk);
-      if (clause.onKeyword == null) {
-        catchBlock = bodyBlock;
+      catchBlock = make.block([ek.apply(exceptionName, stackTraceName)]);
+    } else {
+      // The exception and stack trace parameters do not necessarily have the
+      // same name for all clauses.  If there is only one clause, choose those
+      // names.  Otherwise, choose fresh names to avoid shadowing anything.
+      if (clauses.length == 1) {
+        var only = clauses.first;
+        exceptionName = only.exceptionParameter.name;
+        stackTraceName = only.stackTraceParameter == null
+            ? newName('s')
+            : only.stackTraceParameter.name;
       } else {
-        catchBlock = make.block(
-            [make.ifStatement(
-                 make.isExpression(make.identifier(exceptionName), false,
-                     clause.exceptionType),
-                 bodyBlock,
-                 catchBlock)]);
+        exceptionName = newName('e');
+        stackTraceName = newName('s');
       }
-    }
+      // Build a chain of if/else statements nested in the else blocks.
+      // Construct them in reverse with catchBlock as the accumulator.  If a
+      // clause is unconditional, it will orphan the previous clauses.  Base
+      // case (the final else clause) is to rethrow the exception.
+      catchBlock =
+          make.block([make.throwExpression(make.identifier(exceptionName))]);
+      var savedBlock = currentBlock;
+      for (var clause in clauses.reversed) {
+        var bodyBlock = currentBlock = make.emptyBlock();
+        if (clause.exceptionParameter.name != exceptionName) {
+          addStatement(make.assignmentExpression(clause.exceptionParameter,
+              make.identifier(exceptionName)));
+        }
+        if (clause.stackTraceParameter != null &&
+            clause.stackTraceParameter.name != stackTraceName) {
+          addStatement(make.assignmentExpression(clause.stackTraceParameter,
+              make.identifier(stackTraceName)));
+        }
+        visit(clause.body)(rk, ek, sk);
+        if (clause.onKeyword == null) {
+          catchBlock = bodyBlock;
+        } else {
+          catchBlock = make.block(
+              [make.ifStatement(
+                   make.isExpression(make.identifier(exceptionName), false,
+                       clause.exceptionType),
+                   bodyBlock,
+                   catchBlock)]);
+        }
+      }
 
-    currentBlock = savedBlock;
-    var catchName = newName('catch');
-    // Entering the catch block from the try block is one of two places
-    // where we jump out of a place to one with a different handler (the other
-    // is entering the finally block from the try block of try/catch/finally).
-    // We need to have an appropriate exception handler in place for catching
-    // synchronous exceptions.
-    catchBlock = make.tryStatement(catchBlock,
-        [make.catchClause(null, exceptionName, stackTraceName,
-             make.block([make.functionInvocation(ek,
-                 [make.identifier(exceptionName),
-                  make.identifier(stackTraceName)])]))]);
+      currentBlock = savedBlock;
+      // Entering the catch block from the try block is one of two places
+      // where we jump out of a place to one with a different handler (the other
+      // is entering the finally block from the try block of try/catch/finally).
+      // We need to have an appropriate exception handler in place for catching
+      // synchronous exceptions.
+      catchBlock = make.tryStatement(catchBlock,
+          [make.catchClause(null, exceptionName, stackTraceName,
+               make.block([ek.apply(exceptionName, stackTraceName)]))]);
+    }
     addStatement(make.functionDeclarationStatement(catchName,
         [exceptionName, stackTraceName], catchBlock));
     return catchName;
@@ -1233,9 +1275,7 @@ class AsyncTransformer extends ast.AstVisitor {
       if (node.catchClauses.isNotEmpty) {
         finallyBlock = make.tryStatement(finallyBlock,
             [make.catchClause(null, exceptionName, stackTraceName,
-                 make.block([make.functionInvocation(ek,
-                     [make.identifier(exceptionName),
-                      make.identifier(stackTraceName)])]))]);
+                 make.block([ek.apply(exceptionName, stackTraceName)]))]);
       }
 
       breakTargets = breakTargets.map(newBreakTarget).toList();
@@ -1250,13 +1290,11 @@ class AsyncTransformer extends ast.AstVisitor {
         addStatement(make.functionInvocation(finallyName,
             [make.functionExpression([], returnBlock)]));
       };
-      ek = make.parenthesizedExpression(
-          make.functionExpression([exceptionName, stackTraceName],
-              make.functionInvocation(finallyName,
-                  [make.functionExpression([],
-                       make.functionInvocation(ek,
-                           [make.identifier(exceptionName),
-                            make.identifier(stackTraceName)]))])));
+      var err = ek;
+      ek = new AnonymousErrorContinuation (this, (e, s) {
+        return make.functionInvocation(finallyName,
+            [make.functionExpression([], err.apply(e, s))]);
+      });
       sk = () {
         addStatement(make.functionInvocation(finallyName,
             [make.identifier(joinName)]));
@@ -1276,7 +1314,7 @@ class AsyncTransformer extends ast.AstVisitor {
     var catchName = _translateCatchClauses(node.catchClauses, rk, ek, sk);
 
     var tryBlock = currentBlock = make.emptyBlock();
-    if (catchName != null) ek = make.identifier(catchName);
+    ek = new NamedErrorContinuation(catchName);
     visit(node.body)(rk, ek, sk);
 
     currentBlock = savedBlock;
@@ -1285,14 +1323,7 @@ class AsyncTransformer extends ast.AstVisitor {
 
     var exceptionName = newName('e');
     var stackTraceName = newName('s');
-    var catchBlock;
-    if (catchName != null) {
-      catchBlock = make.block([make.functionInvocation(catchName,
-          [make.identifier(exceptionName), make.identifier(stackTraceName)])]);
-    } else {
-      catchBlock = make.block([make.functionInvocation(ek,
-          [make.identifier(exceptionName), make.identifier(stackTraceName)])]);
-    }
+    var catchBlock = make.block([ek.apply(exceptionName, stackTraceName)]);
     addStatement(make.tryStatement(tryBlock,
         [make.catchClause(null, exceptionName, stackTraceName, catchBlock)]));
   };
@@ -1520,9 +1551,7 @@ class AsyncTransformer extends ast.AstVisitor {
     var stackTraceName = newName('s');
     var body = make.tryStatement(tryBlock,
         [make.catchClause(null, exceptionName, stackTraceName,
-             [make.expressionStatement(make.functionInvocation(ek,
-                  [make.identifier(exceptionName),
-                   make.identifier(stackTraceName)]))])]);
+             make.block([ek.apply(exceptionName, stackTraceName)]))]);
 
     var trampolineName = continueTargets.isEmpty
         ? null
@@ -1554,7 +1583,7 @@ class AsyncTransformer extends ast.AstVisitor {
     return visit(node.expression)(ek, (expr) {
       addStatement(make.methodInvocation(expr, 'then',
           [_reifyAwaitContinuation(sk, ek),
-           make.namedExpression('onError', ek)]));
+           make.namedExpression('onError', ek.reify())]));
     });
   };
 
