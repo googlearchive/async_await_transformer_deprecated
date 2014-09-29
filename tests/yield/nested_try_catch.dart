@@ -2,6 +2,7 @@ import 'dart:collection';
 
 void main() {
    print(f()); // prints (1,2,4)
+}
 
 f() sync* {
   try {

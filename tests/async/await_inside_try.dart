@@ -1,3 +1,5 @@
+import 'dart:async';
+
 f(s) {
   return new Future(() => print(s));
 }

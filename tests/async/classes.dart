@@ -16,11 +16,11 @@ class A {
 }
 
 main() async {
-  var A = new A();
-  print(await A.x);
-  A.x = 7;
-  print(await A.doubleIt());
-  await(A.setX(0));
-  print(await A.x);
-  print(await A.y);
+  var a = new A();
+  print(await a.x);
+  a.x = 7;
+  print(await a.doubleIt());
+  await(a.setX(0));
+  print(await a.x);
+  print(await a.y);
 }
