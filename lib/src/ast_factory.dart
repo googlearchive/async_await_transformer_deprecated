@@ -29,6 +29,21 @@ ast.FunctionExpression functionExpression(List<String> parameters,
   return AstFactory.functionExpression2(formalParameters, functionBody(body));
 }
 
+ast.CatchClause catchClause(ast.TypeName exceptionType, exceptionParameter,
+                            stackTraceParameter, statements) {
+  if (exceptionParameter is ast.SimpleIdentifier) {
+    exceptionParameter = exceptionParameter.name;
+  }
+  if (stackTraceParameter is ast.SimpleIdentifier) {
+    stackTraceParameter = stackTraceParameter.name;
+  }
+  if (statements is ast.Block) {
+    statements = statements.statements;
+  }
+  return AstFactory.catchClause5(exceptionType, exceptionParameter,
+      stackTraceParameter, statements);
+}
+
 ast.SwitchMember switchCase(ast.Expression expression,
                             List<ast.Statement> statements) {
   return expression == null
@@ -56,6 +71,10 @@ ast.Block block(List<ast.AstNode> body) {
 
 ast.Block emptyBlock() {
   return block([]);
+}
+
+ast.DoStatement doStatement(ast.Statement body, ast.Expression condition) {
+  return AstFactory.doStatement(body, condition);
 }
 
 ast.ExpressionStatement expressionStatement(ast.Expression expression) {
@@ -90,6 +109,14 @@ ast.ReturnStatement returnStatement([ast.Expression expr]) {
 ast.SwitchStatement switchStatement(ast.Expression expression,
                                     List<ast.SwitchMember> members) {
   return AstFactory.switchStatement(expression, members);
+}
+
+ast.TryStatement tryStatement(body, List<ast.CatchClause> catchClauses) {
+  if (body is! ast.Block) {
+    assert(body is List);
+    body = block(body);
+  }
+  return AstFactory.tryStatement2(body, catchClauses);
 }
 
 ast.VariableDeclaration variableDeclaration(String name,
