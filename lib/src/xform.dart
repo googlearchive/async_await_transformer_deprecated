@@ -1153,7 +1153,8 @@ class AsyncTransformer extends ast.AstVisitor {
         if (member is ast.SwitchDefault) {
           members.add(make.switchCase(null, bodyBlock.statements));
         } else {
-          members.add(make.switchCase(member.expression, bodyBlock.statements));
+          members.add(make.switchCase((member as ast.SwitchCase).expression,
+              bodyBlock.statements));
         }
       }
       breakTargets = savedBreakTargets;
@@ -1333,7 +1334,7 @@ class AsyncTransformer extends ast.AstVisitor {
         [make.catchClause(null, exceptionName, stackTraceName, catchBlock)]));
   };
 
-  _translateDeclarationList(scanner.Keyword keyword,
+  _translateDeclarationList(scanner.Keyword keyword, ast.TypeName type,
       ast.VariableDeclarationList node, ek, sk) {
     translateDecl(ast.VariableDeclaration decl, ek, sk) {
       if (decl.initializer == null) {
@@ -1358,7 +1359,7 @@ class AsyncTransformer extends ast.AstVisitor {
         decls.add(decl);
         var nextDecl = node.variables[i];
         if (awaits.contains(nextDecl)) {
-          _residualizeDeclarationList(keyword, decls);
+          _residualizeDeclarationList(keyword, type, decls);
           decls.clear();
         }
         translateDecl(nextDecl, ek, nextCont);
@@ -1367,22 +1368,24 @@ class AsyncTransformer extends ast.AstVisitor {
     translateDecl(node.variables.first, ek, cont);
   }
 
-  void _residualizeDeclarationList(scanner.Keyword keyword,
+  void _residualizeDeclarationList(scanner.Keyword keyword, ast.TypeName type,
       List<ast.VariableDeclaration> decls) {
     if (decls.isEmpty) return;
-    addStatement(make.variableDeclarationStatement(keyword, decls));
+    addStatement(make.variableDeclarationStatement(keyword, decls, type));
   }
 
   visitVariableDeclarationStatement(
       ast.VariableDeclarationStatement node) => (rk, ek, sk) {
-    // TODO(kmillikin): A null keyword indicates a type.  Do not discard it!
-    var keyword = node.variables.keyword == null
-        ? scanner.Keyword.VAR
-        : scanner.Keyword.keywords[node.variables.keyword.lexeme];
-    return _translateDeclarationList(keyword, node.variables, ek, (decls) {
-      _residualizeDeclarationList(keyword, decls);
-      return sk();
-    });
+    var keyword;
+    if (node.variables.keyword != null) {
+      keyword = scanner.Keyword.keywords[node.variables.keyword.lexeme];
+    }
+    var type = node.variables.type;
+    return _translateDeclarationList(keyword, type, node.variables, ek,
+        (decls) {
+          _residualizeDeclarationList(keyword, type, decls);
+          return sk();
+        });
   };
 
   // [[while (E) S1; S2]] =
