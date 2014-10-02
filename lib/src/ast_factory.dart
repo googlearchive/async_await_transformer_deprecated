@@ -127,8 +127,10 @@ ast.VariableDeclaration variableDeclaration(String name,
 }
 
 ast.VariableDeclarationStatement variableDeclarationStatement(
-      scanner.Keyword keyword, List<ast.VariableDeclaration> declarations) {
-  return AstFactory.variableDeclarationStatement2(keyword, declarations);
+      scanner.Keyword keyword,
+      List<ast.VariableDeclaration> declarations,
+      [ast.TypeName type]) {
+  return AstFactory.variableDeclarationStatement(keyword, type, declarations);
 }
 
 ast.WhileStatement whileStatement(ast.Expression condition,
