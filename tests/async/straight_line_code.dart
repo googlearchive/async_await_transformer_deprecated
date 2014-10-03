@@ -4,7 +4,7 @@ printAsync(s) async {
    print(s);
 }
 
-main() async {
+main0() async {
   print("A");
   await printAsync("B");
   print("C");
@@ -12,7 +12,7 @@ main() async {
   print("E");
 }
 
-main() async {
+main1() async {
    if(true) {
      await printAsync("A");
    } else {
@@ -21,14 +21,14 @@ main() async {
    print("C");
 }
 
-main() async {
+main2() async {
    while(true) {
      await printAsync("A");
    }
    print("B");
 }
 
-main() async {
+main3() async {
    try {
       print("A");
    } catch(e) {
