@@ -1680,7 +1680,9 @@ class AsyncTransformer extends ast.AstVisitor {
         addStatement(make.methodInvocation(
             make.identifier(currentStream), 'pause', []));
       }
-      addStatement(make.methodInvocation(expr, 'then',
+      var wrapped =
+          make.newInstance(make.identifier('Future', 'value'), [expr]);
+      addStatement(make.methodInvocation(wrapped, 'then',
           [_reifyAwaitContinuation(sk, ek),
            make.namedExpression('onError', ek.reify())]));
     });
