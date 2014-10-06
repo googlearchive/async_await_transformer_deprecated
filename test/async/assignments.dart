@@ -1,6 +1,6 @@
 import 'dart:async';
 
-import 'package:expect/expect.dart';
+import 'package:unittest/unittest.dart';
 
 var result = "";
 
@@ -13,5 +13,5 @@ g(x, y, z) {
 main() async {
   var x = 0;
   g(x, x = 1, await f(2));
-  Expect.equals(result, "012");
+  expect(result, equals("012"));
 }

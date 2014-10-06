@@ -1,14 +1,14 @@
 import 'dart:async';
 
-import 'package:expect/expect.dart';
+import 'package:unittest/unittest.dart';
 
 var result = "";
 
 main() async {
   var a = f();
-  Expect.isTrue(a is Future);
+  expect(a is Future, isTrue);
   var b = await a;
-  Expect.equals(result, "AB");
+  expect(result, equals("AB"));
 }
 
 f() async {
@@ -18,5 +18,5 @@ f() async {
 }
 
 g(n) {
-   return new Future(() => n);
+  return new Future(() => n);
 }
