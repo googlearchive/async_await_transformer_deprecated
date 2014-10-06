@@ -1,7 +1,7 @@
 import 'dart:collection';
 
 void main() {
-   print(new String.fromCharCodes(reverse("aibohphobia")));
+  print(new String.fromCharCodes(reverse("aibohphobia")));
 }
 
 reverse(source) sync* {

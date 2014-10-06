@@ -1,6 +1,6 @@
 import 'dart:async';
 
-import 'package:expect/expect.dart';
+import 'package:unittest/unittest.dart';
 
 var result;
 
@@ -23,26 +23,26 @@ g(x, y, z) {}
 main() async {
   reset();
   g(h('a'), h('b'), h('c'));
-  Expect.equals(result, "abc");
+  expect(result, equals("abc"));
   reset();
   g(h('a'), h('b'), await f('c'));
-  Expect.equals(result, "abc");
+  expect(result, equals("abc"));
   reset();
   g(h('a'), await f('b'), h('c'));
-  Expect.equals(result, "abc");
+  expect(result, equals("abc"));
   reset();
   g(h('a'), await f('b'), await f('c'));
-  Expect.equals(result, "abc");
+  expect(result, equals("abc"));
   reset();
   g(await f('a'), h('b'), h('c'));
-  Expect.equals(result, "abc");
+  expect(result, equals("abc"));
   reset();
   g(await f('a'), h('b'), await f('c'));
-  Expect.equals(result, "abc");
+  expect(result, equals("abc"));
   reset();
   g(await f('a'), await f('b'), h('c'));
-  Expect.equals(result, "abc");
+  expect(result, equals("abc"));
   reset();
   g(await f('a'), await f('b'), await f('c'));
-  Expect.equals(result, "abc");
+  expect(result, equals("abc"));
 }
