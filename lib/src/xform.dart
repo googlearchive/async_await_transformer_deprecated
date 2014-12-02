@@ -803,8 +803,7 @@ class AsyncTransformer extends ast.AstVisitor {
     addStatement(
         make.functionDeclarationStatement(continueName, [], continueBlock));
     visit(node.body)(rk, ek, () {
-      addStatement(make.assignmentExpression(make.identifier(trampolineName),
-          make.identifier(continueName)));
+      _addTrampoline(trampolineName, make.identifier(continueName));
     });
 
     breakTargets = savedBreakTargets;
@@ -1093,8 +1092,7 @@ class AsyncTransformer extends ast.AstVisitor {
 
     var bodyBlock = currentBlock = make.emptyBlock();
     visit(node.body)(rk, ek, () {
-      addStatement(make.assignmentExpression(make.identifier(trampolineName),
-          make.identifier(continueName)));
+      _addTrampoline(trampolineName, make.identifier(continueName));
     });
 
     var loopBlock = currentBlock = make.emptyBlock();
@@ -1568,8 +1566,7 @@ class AsyncTransformer extends ast.AstVisitor {
       var savedBlock = currentBlock;
       var bodyBlock = currentBlock = make.emptyBlock();
       visit(node.body)(rk, ek, () {
-        addStatement(make.assignmentExpression(make.identifier(trampolineName),
-            make.identifier(continueName)));
+        _addTrampoline(trampolineName, make.identifier(continueName));
       });
 
       currentBlock = savedBlock;
