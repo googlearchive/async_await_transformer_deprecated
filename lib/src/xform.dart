@@ -1312,7 +1312,10 @@ class AsyncTransformer extends ast.AstVisitor {
       // names.  Otherwise, choose fresh names to avoid shadowing anything.
       if (clauses.length == 1) {
         var only = clauses.first;
-        exceptionName = currentExceptionName = only.exceptionParameter.name;
+        exceptionName = currentExceptionName = 
+            only.exceptionParameter == null
+                ? newName('e')
+                : only.exceptionParameter.name;
         stackTraceName = currentStackTraceName =
             only.stackTraceParameter == null
                 ? newName('s')
@@ -1330,7 +1333,8 @@ class AsyncTransformer extends ast.AstVisitor {
       var savedBlock = currentBlock;
       for (var clause in clauses.reversed) {
         var bodyBlock = currentBlock = make.emptyBlock();
-        if (clause.exceptionParameter.name != exceptionName) {
+        if (clause.exceptionParameter != null &&
+            clause.exceptionParameter.name != exceptionName) {
           addStatement(make.assignmentExpression(clause.exceptionParameter,
               make.identifier(exceptionName)));
         }

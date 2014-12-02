@@ -380,6 +380,19 @@ class PrettyPrinter extends ast.RecursiveAstVisitor {
     });
   }
 
+  visitConstructorName(ast.ConstructorName node) {
+    visit(node.type);
+    if (node.name != null) {
+      buffer.write('.');
+      visit(node.name);
+    }
+  }
+
+  visitTypeName(ast.TypeName node) {
+    visit(node.name);
+    if (node.typeArguments != null) buffer.write(node.typeArguments);
+  }
+
   visitFunctionExpression(ast.FunctionExpression node) {
     buffer.write(node.parameters);
     if (node.body is! ast.EmptyFunctionBody) buffer.write(' ');
