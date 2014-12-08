@@ -15,9 +15,9 @@ Add this to your pubspec.yaml file:
 ```
 dependencies:
   async_await:
-    git: git@github.com:dart-lang/async_await.git
+    git: https://github.com/dart-lang/async_await.git
 transformers:
-- async_await
+  - async_await
 ```
 
 ## What works
