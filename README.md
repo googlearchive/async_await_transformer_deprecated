@@ -20,7 +20,7 @@ transformers:
   - async_await
 ```
 
-Import dart:io in your Dart file:
+Import dart:async in your Dart file:
 
 ```
 import 'dart:async';
