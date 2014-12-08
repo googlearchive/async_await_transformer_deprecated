@@ -17,7 +17,7 @@ dependencies:
   async_await:
     git: https://github.com/dart-lang/async_await.git
 transformers:
-  - async_await
+- async_await
 ```
 
 Import dart:async in your Dart file:
