@@ -18,6 +18,7 @@ CompilationUnit parse(String source, AnalysisErrorListener errorListener) {
   var token = scanner.tokenize();
   var parser = new Parser(null, errorListener);
   parser.parseAsync = true;
+  parser.parseEnum = true;
   return parser.parseCompilationUnit(token);
 }
 
