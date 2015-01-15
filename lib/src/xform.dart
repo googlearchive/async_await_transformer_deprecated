@@ -1281,6 +1281,7 @@ class AsyncTransformer extends ast.AstVisitor {
               make.block([make.functionInvocation(continueNames[index])]);
           ++index;
         }
+        bodyBlock.statements.add(make.breakStatement());
         if (member is ast.SwitchDefault) {
           members.add(make.switchCase(null, bodyBlock.statements));
         } else {
@@ -1310,7 +1311,7 @@ class AsyncTransformer extends ast.AstVisitor {
       // names.  Otherwise, choose fresh names to avoid shadowing anything.
       if (clauses.length == 1) {
         var only = clauses.first;
-        exceptionName = currentExceptionName = 
+        exceptionName = currentExceptionName =
             only.exceptionParameter == null
                 ? newName('e')
                 : only.exceptionParameter.name;
