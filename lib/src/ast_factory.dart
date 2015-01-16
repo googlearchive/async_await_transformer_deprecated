@@ -73,6 +73,10 @@ ast.Block emptyBlock() {
   return block([]);
 }
 
+ast.BreakStatement breakStatement() {
+  return AstFactory.breakStatement();
+}
+
 ast.DoStatement doStatement(ast.Statement body, ast.Expression condition) {
   return AstFactory.doStatement(body, condition);
 }
