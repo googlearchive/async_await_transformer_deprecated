@@ -1328,7 +1328,7 @@ class AsyncTransformer extends ast.AstVisitor {
       // clause is unconditional, it will orphan the previous clauses.  Base
       // case (the final else clause) is to rethrow the exception.
       catchBlock =
-          make.block([make.throwExpression(make.identifier(exceptionName))]);
+          make.block([ek.apply(exceptionName, stackTraceName)]);
       var savedBlock = currentBlock;
       for (var clause in clauses.reversed) {
         var bodyBlock = currentBlock = make.emptyBlock();
