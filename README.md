@@ -1,7 +1,7 @@
 async-await transformer DEPRECATED
 =======================
 
-**Use Dart 1.9 for native support for async/await/sync*/async*/yield.**
+**Use Dart 1.9+ for [native support][doc] for async/await/sync*/async*/yield.**
 
 A prototype (and in progress) implementation of async/await in Dart,
 via CPS translation.
@@ -40,4 +40,5 @@ See also the [open issues][issues].
 
 * Stack traces are not according to the spec
 
+[doc]: https://www.dartlang.org/guides/language/language-tour#asynchrony-support
 [issues]: https://github.com/dart-lang/async_await/issues
